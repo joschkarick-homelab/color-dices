@@ -42,7 +42,15 @@ export type EventId =
 export interface HouseRule {
   enabled: boolean
   text: string
+  /** Dürfen nach dem Event die beteiligten Würfel neu geworfen werden, um Ziele zu bestimmen? */
+  reroll?: boolean
 }
+
+/** Events, bei denen ein Zielwurf möglich ist (würfelbasierte Events). */
+export const REROLLABLE_EVENTS: EventId[] = ['paschWW', 'paschWC', 'smallStraight', 'largeStraight']
+
+/** Referenz auf einen Würfel (für Zielwürfe). */
+export type DieRef = 'white' | Color
 
 export type HouseRules = Record<EventId, HouseRule>
 
@@ -58,10 +66,10 @@ export const EVENT_META: Record<EventId, { title: string; emoji: string; hint: s
 
 export function defaultHouseRules(): HouseRules {
   return {
-    paschWW: { enabled: true, text: 'Alle trinken einen Schluck! 🍻' },
-    paschWC: { enabled: true, text: 'Wer gewürfelt hat, verteilt einen Schluck.' },
-    smallStraight: { enabled: true, text: 'Verteile 2 Schlücke.' },
-    largeStraight: { enabled: true, text: 'Alle trinken aus! 🍻' },
+    paschWW: { enabled: true, text: 'Alle trinken einen Schluck! 🍻', reroll: false },
+    paschWC: { enabled: true, text: 'Wer gewürfelt hat, verteilt einen Schluck.', reroll: false },
+    smallStraight: { enabled: true, text: 'Verteile 2 Schlücke.', reroll: false },
+    largeStraight: { enabled: true, text: 'Alle trinken aus! 🍻', reroll: false },
     rowLocked: { enabled: true, text: 'Wer die Reihe zugemacht hat, verteilt 3 Schlücke.' },
     penalty: { enabled: true, text: 'Strafschluck für den Fehlwurf! 🥴' },
     win: { enabled: true, text: 'Wer verliert, räumt den Tisch ab. 😄' },
@@ -73,6 +81,8 @@ export interface GameEvent {
   id: EventId
   player?: string // Name, falls das Event von einer Person ausgelöst wurde
   detail?: string // z. B. "Rot" bei Reihe zugemacht
+  dice?: DieRef[] // Würfel, die das Event ausgelöst haben (für Zielwürfe)
+  target?: number[] // ausgewürfelte Ziele (parallel zu `dice`), gesetzt nach dem Zielwurf
 }
 
 // ---------------------------------------------------------------------------
@@ -172,43 +182,80 @@ export function colorSums(dice: DiceValues, color: Color): number[] {
 function detectRollEvents(state: GameState): GameEvent[] {
   const dice = state.dice!
   const events: GameEvent[] = []
-  const add = (id: EventId, detail?: string) => {
+  const add = (id: EventId, detail?: string, involved?: DieRef[]) => {
     if (!state.houseRules[id].enabled) return
     events.push({
       uid: `${state.rollId}-${id}-${events.length}`,
       id,
       player: state.names[state.active],
       detail,
+      dice: involved,
     })
   }
 
-  if (dice.w1 === dice.w2) add('paschWW', `Weiß ${dice.w1} & ${dice.w2}`)
+  if (dice.w1 === dice.w2) {
+    add('paschWW', `Weiß ${dice.w1} & ${dice.w2}`, ['white', 'white'])
+  }
 
   const wcMatches = COLORS.filter((c) => {
     const v = dice[c]
     return v !== undefined && (v === dice.w1 || v === dice.w2)
   })
   if (wcMatches.length > 0) {
-    add('paschWC', wcMatches.map((c) => `${COLOR_NAMES[c]} ${dice[c]}`).join(', '))
+    add(
+      'paschWC',
+      wcMatches.map((c) => `${COLOR_NAMES[c]} ${dice[c]}`).join(', '),
+      ['white', ...wcMatches],
+    )
   }
 
-  const values = new Set<number>([
-    dice.w1,
-    dice.w2,
-    ...COLORS.map((c) => dice[c]).filter((v): v is number => v !== undefined),
-  ])
-  const hasRun = (len: number): boolean => {
+  // Alle Würfel als (Referenz, Wert)-Paare — für Straßen-Erkennung inkl. Beteiligter
+  const pool: [DieRef, number][] = [
+    ['white', dice.w1],
+    ['white', dice.w2],
+    ...COLORS.filter((c) => dice[c] !== undefined).map((c): [DieRef, number] => [c, dice[c]!]),
+  ]
+  const values = new Set(pool.map(([, v]) => v))
+  const runOf = (len: number): number[] | null => {
     for (let start = 1; start + len - 1 <= 6; start++) {
-      let ok = true
-      for (let v = start; v < start + len; v++) if (!values.has(v)) ok = false
-      if (ok) return true
+      const run = Array.from({ length: len }, (_, i) => start + i)
+      if (run.every((v) => values.has(v))) return run
     }
-    return false
+    return null
   }
-  if (hasRun(5)) add('largeStraight')
-  else if (hasRun(4)) add('smallStraight')
+  const diceForRun = (run: number[]): DieRef[] => {
+    const used = new Set<number>()
+    return run.map((v) => {
+      const idx = pool.findIndex(([, val], i) => val === v && !used.has(i))
+      used.add(idx)
+      return pool[idx][0]
+    })
+  }
+
+  const large = runOf(5)
+  const small = runOf(4)
+  if (large) add('largeStraight', large.join('-'), diceForRun(large))
+  else if (small) add('smallStraight', small.join('-'), diceForRun(small))
 
   return events
+}
+
+/**
+ * Zielwurf für ein würfelbasiertes Hausregel-Event: Die beteiligten Würfel
+ * werden neu geworfen, um Ziele (1–6 je Würfel) zu bestimmen. Pro Event nur
+ * einmal möglich. Gibt das aktualisierte Event zurück, sonst null.
+ */
+export function rollTarget(
+  state: GameState,
+  uid: string,
+  random: () => number = Math.random,
+): GameEvent | null {
+  const e = state.events.find((x) => x.uid === uid)
+  if (!e || !e.dice || e.target) return null
+  const rule = state.houseRules[e.id]
+  if (!rule.enabled || !rule.reroll || !REROLLABLE_EVENTS.includes(e.id)) return null
+  e.target = e.dice.map(() => 1 + Math.floor(random() * 6))
+  return e
 }
 
 // ---------------------------------------------------------------------------

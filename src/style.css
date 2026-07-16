@@ -181,6 +181,28 @@ input.code {
   color: var(--muted);
 }
 
+.reroll-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.reroll-opt input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--green);
+  flex-shrink: 0;
+}
+
+.reroll-opt .hint {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
 .rule-item textarea {
   width: 100%;
   margin-top: 10px;
@@ -380,6 +402,37 @@ input.code {
 .sum-chip.yellow { background: var(--yellow); }
 .sum-chip.green { background: var(--green); }
 .sum-chip.blue { background: var(--blue); }
+
+.sum-chip.target-btn {
+  background: linear-gradient(135deg, #7b5cf0, #4f8ef7);
+  animation: pulse 1.8s ease-in-out infinite;
+  cursor: pointer;
+}
+
+.target-chips {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.die-chip {
+  width: 46px;
+  height: 46px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  font-weight: 800;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.die-chip.white { background: #f5f2ea; color: #111; }
+.die-chip.red { background: var(--red); }
+.die-chip.yellow { background: var(--yellow); }
+.die-chip.green { background: var(--green); }
+.die-chip.blue { background: var(--blue); }
 
 /* --- Zettel --- */
 .board {

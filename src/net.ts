@@ -34,6 +34,7 @@ export type NetMessage =
   | { t: 'state'; s: GameState }
   | { t: 'move'; move: Move }
   | { t: 'rollreq' } // Gast ist am Zug und möchte würfeln (Host würfelt)
+  | { t: 'targetreq'; uid: string } // Gast möchte für ein Event das Ziel auswürfeln
 
 export function randomCode(len = 4): string {
   let out = ''

@@ -45,6 +45,12 @@ festlegen, der beiden angezeigt wird, sobald es eintritt:
 | ❌ Strafe | jemand kassiert einen Fehlwurf |
 | 🏆 Sieg | jemand gewinnt |
 
+Für die würfelbasierten Events (beide Päsche, beide Straßen) gibt es zusätzlich
+die Option **„🎯 Ziel auswürfeln?"**: Ist sie aktiv, können nach dem Event die
+beteiligten Würfel einmal neu geworfen werden (per Button im Event-Banner oder
+über den 🎯-Chip), um Ziele von 1–6 zu bestimmen — z. B. wer wie viel verteilt.
+Beide Handys sehen dieselben Zielwerte.
+
 ### Die Würfel 🎲
 
 Jeder Wurf wird mit einer echten Starrkörper-Physiksimulation gewürfelt
