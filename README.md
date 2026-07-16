@@ -83,8 +83,8 @@ Gleicher Flow wie bei TimeHub / Date-App:
    `docker compose pull && up -d`.
 
 Benötigte Secrets (wie gehabt): `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`,
-`DEPLOY_USER`, `DEPLOY_HOST`, `DEPLOY_PATH` — plus optional `HOST_PORT`
-(Default 8090). Da das Repo privat ist, muss der LXC einmalig per
+`DEPLOY_USER`, `DEPLOY_HOST` — plus optional `HOST_PORT` (Default 8090).
+Dazu die Repository-Variable `DEPLOY_PATH` (Zielverzeichnis auf dem LXC). Da das Repo privat ist, muss der LXC einmalig per
 `docker login ghcr.io` (PAT mit `read:packages`) angemeldet sein — oder das
 GHCR-Package auf „public" gestellt werden.
 
