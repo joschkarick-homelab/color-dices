@@ -1,0 +1,8 @@
+# Produktion im Homelab-LXC — wird vom Deploy-Workflow per Tailscale-SSH
+# kopiert und mit `--env-file stack.env` gestartet.
+services:
+  qwixx:
+    image: ghcr.io/joschkarick/qwixx:latest
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-8090}:80"
