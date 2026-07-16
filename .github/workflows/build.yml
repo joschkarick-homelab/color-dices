@@ -16,7 +16,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE: ${{ github.repository_owner }}/qwixx
+  IMAGE: ${{ github.repository }}
 
 jobs:
   build:

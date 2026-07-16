@@ -77,7 +77,7 @@ Push auf `main` und deployt sie nach GitHub Pages. Einmalig aktivieren:
 Gleicher Flow wie bei TimeHub / Date-App:
 
 1. [`build.yml`](.github/workflows/build.yml) baut das Image und pusht nach
-   `ghcr.io/joschkarick/qwixx:latest`.
+   `ghcr.io/joschkarick-homelab/color-dices:latest`.
 2. [`deploy.yml`](.github/workflows/deploy.yml) verbindet sich per Tailscale
    mit dem LXC, kopiert `docker-compose.prod.yml` + `stack.env` und macht
    `docker compose pull && up -d`.
