@@ -12,7 +12,9 @@ import {
   colorSums,
   defaultHouseRules,
   newGame,
+  REROLLABLE_EVENTS,
   rollDice,
+  rollTarget,
   rowCrossCount,
   rowScore,
   submitMove,
@@ -47,6 +49,7 @@ let rollRequested = false
 let lastAnimatedRollId = 0
 let submittedRollId = 0
 let shownEvents = new Set<string>()
+let shownTargets = new Set<string>()
 let bannerQueue: GameEvent[] = []
 let bannerActive = false
 let peerConnected = false
@@ -137,6 +140,8 @@ function setupHostHandlers(): void {
       afterHostChange()
     } else if (m.t === 'rollreq') {
       if (state.active === 1) hostRoll()
+    } else if (m.t === 'targetreq') {
+      hostRollTarget(m.uid)
     }
   }
   net.onPeerConnected = () => {
@@ -163,6 +168,7 @@ function setupGuestHandlers(): void {
       // Erster Stand oder Revanche: Events/Animationen zurücksetzen
       selection = { white: null, colored: null }
       shownEvents = new Set(prev ? [] : state.events.map((e) => e.uid))
+      shownTargets = new Set(prev ? [] : state.events.filter((e) => e.target).map((e) => e.uid))
       lastAnimatedRollId = prev ? 0 : state.rollId
       submittedRollId = 0
     }
@@ -172,6 +178,7 @@ function setupGuestHandlers(): void {
       void animateRoll()
     } else {
       queueResolutionEvents()
+      queueTargetAnimations()
       render()
     }
   }
@@ -198,6 +205,31 @@ function requestRoll(): void {
     net?.send({ t: 'rollreq' })
     render()
   }
+}
+
+function hostRollTarget(uid: string): void {
+  if (!state) return
+  const e = rollTarget(state, uid)
+  if (!e) return
+  persistHostState()
+  net?.send({ t: 'state', s: state })
+  queueTargetAnimations()
+}
+
+function requestTarget(uid: string): void {
+  if (!state || animating) return
+  if (net?.role === 'host') {
+    hostRollTarget(uid)
+  } else {
+    net?.send({ t: 'targetreq', uid })
+  }
+}
+
+/** Noch nicht animierte Zielwürfe abspielen (Guard: shownTargets). */
+function queueTargetAnimations(): void {
+  if (!state || animating) return
+  const pending = state.events.find((e) => e.target && !shownTargets.has(e.uid))
+  if (pending) void animateTarget(pending)
 }
 
 function confirmMove(): void {
@@ -278,6 +310,52 @@ async function animateRoll(): Promise<void> {
   }
   queueRollEvents()
   render()
+  queueTargetAnimations()
+}
+
+/** Zielwurf abspielen: nur die beteiligten Würfel werden neu geworfen. */
+async function animateTarget(e: GameEvent): Promise<void> {
+  if (!tray || !e.target || !e.dice || shownTargets.has(e.uid)) return
+  shownTargets.add(e.uid)
+  animating = true
+  render()
+  const specs: DieSpec[] = e.dice.map((kind, i) => ({ kind, value: e.target![i] }))
+  try {
+    await tray.roll(specs)
+  } finally {
+    animating = false
+  }
+  render()
+  await showTargetBanner(e)
+  render()
+  queueTargetAnimations()
+}
+
+function showTargetBanner(e: GameEvent): Promise<void> {
+  return new Promise((resolve) => {
+    const meta = EVENT_META[e.id]
+    const chips = e.dice!
+      .map((kind, i) => `<span class="die-chip ${kind}">${e.target![i]}</span>`)
+      .join('')
+    const el = document.createElement('div')
+    el.className = 'banner-backdrop'
+    el.innerHTML = `
+      <div class="banner">
+        <div class="emoji">🎯</div>
+        <h2>Ziel ausgewürfelt!</h2>
+        <p class="who">${meta.emoji} ${esc(meta.title)}</p>
+        <div class="target-chips">${chips}</div>
+        <div class="tap-hint">Tippen zum Schließen</div>
+      </div>`
+    document.body.appendChild(el)
+    const close = (): void => {
+      clearTimeout(timer)
+      el.remove()
+      resolve()
+    }
+    const timer = setTimeout(close, 6000)
+    el.addEventListener('click', close)
+  })
 }
 
 function queueRollEvents(): void {
@@ -313,6 +391,9 @@ function showBanner(e: GameEvent): Promise<void> {
   return new Promise((resolve) => {
     const meta = EVENT_META[e.id]
     const rule = state?.houseRules[e.id]
+    const canTarget = Boolean(
+      e.dice && !e.target && rule?.enabled && rule.reroll && REROLLABLE_EVENTS.includes(e.id),
+    )
     const el = document.createElement('div')
     el.className = 'banner-backdrop'
     el.innerHTML = `
@@ -322,6 +403,7 @@ function showBanner(e: GameEvent): Promise<void> {
         ${e.player && e.id !== 'win' ? `<p class="who">${esc(e.player)}${e.detail ? ` · ${esc(e.detail)}` : ''}</p>` : ''}
         ${e.id === 'win' && !e.player ? `<p class="who">Unentschieden!</p>` : ''}
         ${rule?.enabled && rule.text ? `<div class="ruletext">${esc(rule.text)}</div>` : ''}
+        ${canTarget ? `<div style="height:12px"></div><button class="btn primary" id="bannerTarget">🎯 Ziel auswürfeln</button>` : ''}
         <div class="tap-hint">Tippen zum Schließen</div>
       </div>`
     document.body.appendChild(el)
@@ -330,8 +412,13 @@ function showBanner(e: GameEvent): Promise<void> {
       el.remove()
       resolve()
     }
-    const timer = setTimeout(close, 5000)
+    const timer = setTimeout(close, canTarget ? 12000 : 5000)
     el.addEventListener('click', close)
+    el.querySelector('#bannerTarget')?.addEventListener('click', (ev) => {
+      ev.stopPropagation()
+      close()
+      requestTarget(e.uid)
+    })
   })
 }
 
@@ -400,7 +487,14 @@ function showSetup(): void {
                 <span class="title">${esc(meta.title)}<span class="hint">${esc(meta.hint)}</span></span>
                 <label class="switch"><input type="checkbox" data-toggle ${r.enabled ? 'checked' : ''} /><span></span></label>
               </div>
-              <textarea rows="2" data-text placeholder="z. B. Alle trinken einen Schluck …" ${r.enabled ? '' : 'style="display:none"'}>${esc(r.text)}</textarea>
+              <div class="rule-body" ${r.enabled ? '' : 'style="display:none"'}>
+                <textarea rows="2" data-text placeholder="z. B. Alle trinken einen Schluck …">${esc(r.text)}</textarea>
+                ${
+                  REROLLABLE_EVENTS.includes(id)
+                    ? `<label class="reroll-opt"><input type="checkbox" data-reroll ${r.reroll ? 'checked' : ''} /> 🎯 Ziel auswürfeln? <span class="hint">Die beteiligten Würfel dürfen neu geworfen werden, um Ziele (1–6) zu bestimmen</span></label>`
+                    : ''
+                }
+              </div>
             </div>`
           })
           .join('')}
@@ -412,8 +506,8 @@ function showSetup(): void {
 
   app.querySelectorAll<HTMLInputElement>('[data-toggle]').forEach((toggle) => {
     toggle.addEventListener('change', () => {
-      const ta = toggle.closest('.rule-item')!.querySelector<HTMLElement>('[data-text]')!
-      ta.style.display = toggle.checked ? '' : 'none'
+      const body = toggle.closest('.rule-item')!.querySelector<HTMLElement>('.rule-body')!
+      body.style.display = toggle.checked ? '' : 'none'
     })
   })
   app.querySelector('#back')!.addEventListener('click', () => showHome())
@@ -424,6 +518,7 @@ function showSetup(): void {
       rules[id] = {
         enabled: item.querySelector<HTMLInputElement>('[data-toggle]')!.checked,
         text: item.querySelector<HTMLTextAreaElement>('[data-text]')!.value.trim(),
+        reroll: item.querySelector<HTMLInputElement>('[data-reroll]')?.checked ?? false,
       }
     })
     localStorage.setItem('qwixx.rules', JSON.stringify(rules))
@@ -549,6 +644,7 @@ async function resumeSession(session: Session): Promise<void> {
   state = saved
   lastAnimatedRollId = state.rollId
   shownEvents = new Set(state.events.map((e) => e.uid))
+  shownTargets = new Set(state.events.filter((e) => e.target).map((e) => e.uid))
   saveSession({ role: 'host', code: net.code, name: session.name })
   setupHostHandlers()
   mountGame()
@@ -596,6 +692,8 @@ function onDynClick(ev: Event): void {
     handleCellTap(target.dataset.color as Color, Number(target.dataset.index))
   } else if (action === 'confirm') {
     confirmMove()
+  } else if (action === 'target') {
+    requestTarget(target.dataset.uid!)
   } else if (action === 'mute') {
     if (tray) {
       tray.muted = !tray.muted
@@ -611,6 +709,7 @@ function onDynClick(ev: Event): void {
       lastAnimatedRollId = 0
       submittedRollId = 0
       shownEvents = new Set()
+      shownTargets = new Set()
       afterHostChange()
     }
   } else if (action === 'leave') {
@@ -702,6 +801,13 @@ function renderDyn(): void {
         if (list.length) {
           sums += `<span class="sum-chip ${c}">${esc(COLOR_NAMES[c])} ${list.join(' / ')}</span>`
         }
+      }
+    }
+    // Ausstehende Zielwürfe (Hausregeln mit „Ziel auswürfeln")
+    for (const e of s.events) {
+      const rule = s.houseRules[e.id]
+      if (e.dice && !e.target && rule.enabled && rule.reroll) {
+        sums += `<button class="sum-chip target-btn" data-action="target" data-uid="${e.uid}">🎯 ${esc(EVENT_META[e.id].title)}: Ziel auswürfeln</button>`
       }
     }
   }
@@ -849,6 +955,7 @@ function showRulesOverlay(): void {
       return `<div class="rule-item" style="text-align:left">
         <div class="rule-head"><span>${meta.emoji}</span><span class="title">${esc(meta.title)}<span class="hint">${esc(meta.hint)}</span></span></div>
         ${r.text ? `<p style="margin:8px 0 0;font-size:0.95rem">${esc(r.text)}</p>` : ''}
+        ${r.reroll ? `<p style="margin:6px 0 0;font-size:0.8rem;color:var(--muted)">🎯 Ziel wird ausgewürfelt</p>` : ''}
       </div>`
     })
     .join('')
