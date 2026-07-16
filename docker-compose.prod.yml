@@ -2,7 +2,7 @@
 # kopiert und mit `--env-file stack.env` gestartet.
 services:
   qwixx:
-    image: ghcr.io/joschkarick/qwixx:latest
+    image: ghcr.io/joschkarick-homelab/color-dices:latest
     restart: unless-stopped
     ports:
       - "${HOST_PORT:-8090}:80"
