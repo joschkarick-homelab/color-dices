@@ -90,11 +90,16 @@ GHCR-Package auf „public" gestellt werden.
 
 Lokal testen: `docker compose up --build` → http://localhost:8090
 
-### Eigener PeerJS-Server (optional)
+### PeerJS-Signalisierung
 
-Falls der öffentliche PeerJS-Broker mal klemmt, kann ein eigener
-[PeerServer](https://github.com/peers/peerjs-server) genutzt werden — auf
-beiden Handys einmal in der Browser-Konsole:
+Im Homelab-Deployment (Variante B) läuft ein eigener
+[PeerServer](https://github.com/peers/peerjs-server) als `peer`-Container im
+Compose-Stack. nginx proxied ihn unter `/peer` auf derselben Domain — die App
+nutzt ihn im Docker-Build automatisch (Build-Variable `VITE_PEER_PATH`).
+
+Vite-Dev und GitHub Pages (Variante A) haben keinen eigenen Broker und
+nutzen die öffentliche PeerJS-Cloud. Ein manueller Override geht weiterhin
+auf beiden Geräten per Browser-Konsole:
 
 ```js
 localStorage.setItem('qwixx.peerhost', 'peer.example.de:443/qwixx')

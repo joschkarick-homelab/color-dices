@@ -8,24 +8,39 @@ import type { GameState, Move } from './rules'
 const ID_PREFIX = 'qwixx-de-'
 
 /**
- * Standardmäßig läuft die Signalisierung über den kostenlosen öffentlichen
- * PeerJS-Broker. Wer einen eigenen PeerServer betreibt, kann ihn per
- * localStorage-Eintrag nutzen, z. B.:
+ * Signalisierung: Im Docker-Build läuft ein eigener PeerServer im Stack,
+ * den nginx unter /peer auf derselben Origin bereitstellt (Build-Variable
+ * VITE_PEER_PATH). Ohne diese Variable (Vite-Dev, GitHub Pages) wird der
+ * öffentliche PeerJS-Cloud-Broker genutzt. Ein manueller Override ist
+ * weiterhin per localStorage möglich, z. B.:
  *   localStorage.setItem('qwixx.peerhost', 'peer.example.de:443/qwixx')
  */
 function peerOptions(): PeerOptions {
   const raw = localStorage.getItem('qwixx.peerhost')
-  if (!raw) return {}
-  const match = raw.match(/^([^:/]+)(?::(\d+))?(\/.*)?$/)
-  if (!match) return {}
-  const [, host, port, path] = match
-  const secure = host !== 'localhost' && host !== '127.0.0.1'
-  return {
-    host,
-    port: port ? Number(port) : secure ? 443 : 80,
-    path: path ?? '/',
-    secure,
+  if (raw) {
+    const match = raw.match(/^([^:/]+)(?::(\d+))?(\/.*)?$/)
+    if (match) {
+      const [, host, port, path] = match
+      const secure = host !== 'localhost' && host !== '127.0.0.1'
+      return {
+        host,
+        port: port ? Number(port) : secure ? 443 : 80,
+        path: path ?? '/',
+        secure,
+      }
+    }
   }
+  const peerPath = import.meta.env.VITE_PEER_PATH as string | undefined
+  if (peerPath) {
+    const secure = location.protocol === 'https:'
+    return {
+      host: location.hostname,
+      port: location.port ? Number(location.port) : secure ? 443 : 80,
+      path: peerPath,
+      secure,
+    }
+  }
+  return {}
 }
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789' // ohne I/L/O/0/1
 

@@ -11,6 +11,7 @@ on:
       - "vite.config.ts"
       - "tsconfig.json"
       - "Dockerfile"
+      - "nginx.conf"
       - ".github/workflows/build.yml"
   workflow_dispatch:
 

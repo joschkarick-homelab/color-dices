@@ -6,3 +6,11 @@ services:
     restart: unless-stopped
     ports:
       - "${HOST_PORT:-8090}:80"
+    depends_on:
+      - peer
+
+  # Eigener PeerJS-Broker für die Signalisierung — erreichbar nur über den
+  # /peer-Proxy im nginx der App, kein eigener veröffentlichter Port.
+  peer:
+    image: peerjs/peerjs-server:latest
+    restart: unless-stopped
