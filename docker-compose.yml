@@ -4,3 +4,8 @@ services:
     build: .
     ports:
       - "8090:80"
+    depends_on:
+      - peer
+
+  peer:
+    image: peerjs/peerjs-server:latest
