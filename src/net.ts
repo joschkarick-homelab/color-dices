@@ -54,7 +54,22 @@ export class Net {
     private conn: DataConnection | null,
     readonly code: string,
     readonly role: 'host' | 'guest',
-  ) {}
+  ) {
+    // Geht der Tab in den Hintergrund (Standby, App-Wechsel), kappt der
+    // Browser die WebSocket zum Broker und die Raum-ID ist dort nicht mehr
+    // registriert — Beitritte schlagen dann mit peer-unavailable fehl.
+    // Deshalb: Registrierung automatisch erneuern.
+    peer.on('disconnected', () => {
+      if (!peer.destroyed) peer.reconnect()
+    })
+    document.addEventListener('visibilitychange', this.onVisible)
+  }
+
+  private onVisible = (): void => {
+    if (document.visibilityState === 'visible' && this.peer.disconnected && !this.peer.destroyed) {
+      this.peer.reconnect()
+    }
+  }
 
   /**
    * Raum eröffnen. Bei Code-Kollision wird automatisch neu gewürfelt.
@@ -86,25 +101,46 @@ export class Net {
   }
 
   static join(code: string): Promise<Net> {
+    const id = ID_PREFIX + code.toUpperCase()
     return new Promise((resolve, reject) => {
       const peer = new Peer(peerOptions())
-      const timeout = setTimeout(() => {
-        peer.destroy()
-        reject(new Error('Zeitüberschreitung – Code richtig? Ist das Spiel noch offen?'))
-      }, 15000)
-      peer.on('error', (err) => {
+      let attempts = 0
+      let settled = false
+      const fail = (err: Error): void => {
+        if (settled) return
+        settled = true
         clearTimeout(timeout)
+        peer.destroy()
         reject(err)
-      })
-      peer.on('open', () => {
-        const conn = peer.connect(ID_PREFIX + code.toUpperCase(), { reliable: true })
+      }
+      const timeout = setTimeout(
+        () => fail(new Error('Zeitüberschreitung – Code richtig? Ist das Spiel noch offen?')),
+        20000,
+      )
+      const tryConnect = (): void => {
+        if (settled) return
+        const conn = peer.connect(id, { reliable: true })
         conn.on('open', () => {
+          if (settled) return
+          settled = true
           clearTimeout(timeout)
           const net = new Net(peer, null, code.toUpperCase(), 'guest')
           net.attach(conn)
           resolve(net)
         })
+      }
+      peer.on('error', (err) => {
+        // Der Host registriert sich nach Standby ggf. gerade neu beim
+        // Broker — bei „Raum nicht gefunden" darum erst ein paarmal
+        // nachfassen, bevor wir aufgeben.
+        if ((err as { type?: string }).type === 'peer-unavailable') {
+          if (attempts++ < 4) setTimeout(tryConnect, 2000)
+          else fail(new Error('Raum nicht gefunden – Code richtig? Ist das Spiel auf dem anderen Gerät noch geöffnet?'))
+        } else {
+          fail(err)
+        }
       })
+      peer.on('open', tryConnect)
     })
   }
 
@@ -129,6 +165,7 @@ export class Net {
   }
 
   destroy(): void {
+    document.removeEventListener('visibilitychange', this.onVisible)
     this.peer.destroy()
   }
 }
