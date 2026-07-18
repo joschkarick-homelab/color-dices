@@ -44,10 +44,15 @@ export interface HouseRule {
   text: string
   /** Dürfen nach dem Event die beteiligten Würfel neu geworfen werden, um Ziele zu bestimmen? */
   reroll?: boolean
+  /** Eigene Texte je Pasch-Zahl (1–6); Fallback ist `text`. Nur für Pasch-Events. */
+  numberTexts?: Partial<Record<number, string>>
 }
 
 /** Events, bei denen ein Zielwurf möglich ist (würfelbasierte Events). */
 export const REROLLABLE_EVENTS: EventId[] = ['paschWW', 'paschWC', 'smallStraight', 'largeStraight']
+
+/** Events, für die Texte pro Pasch-Zahl konfigurierbar sind. */
+export const PASCH_EVENTS: EventId[] = ['paschWW', 'paschWC']
 
 /** Referenz auf einen Würfel (für Zielwürfe). */
 export type DieRef = 'white' | Color
@@ -83,6 +88,7 @@ export interface GameEvent {
   detail?: string // z. B. "Rot" bei Reihe zugemacht
   dice?: DieRef[] // Würfel, die das Event ausgelöst haben (für Zielwürfe)
   target?: number[] // ausgewürfelte Ziele (parallel zu `dice`), gesetzt nach dem Zielwurf
+  numbers?: number[] // Pasch-Zahl(en) des Events — wählt ggf. den Text aus numberTexts
 }
 
 // ---------------------------------------------------------------------------
@@ -182,7 +188,7 @@ export function colorSums(dice: DiceValues, color: Color): number[] {
 function detectRollEvents(state: GameState): GameEvent[] {
   const dice = state.dice!
   const events: GameEvent[] = []
-  const add = (id: EventId, detail?: string, involved?: DieRef[]) => {
+  const add = (id: EventId, detail?: string, involved?: DieRef[], numbers?: number[]) => {
     if (!state.houseRules[id].enabled) return
     events.push({
       uid: `${state.rollId}-${id}-${events.length}`,
@@ -190,11 +196,12 @@ function detectRollEvents(state: GameState): GameEvent[] {
       player: state.names[state.active],
       detail,
       dice: involved,
+      numbers,
     })
   }
 
   if (dice.w1 === dice.w2) {
-    add('paschWW', `Weiß ${dice.w1} & ${dice.w2}`, ['white', 'white'])
+    add('paschWW', `Weiß ${dice.w1} & ${dice.w1}`, ['white', 'white'], [dice.w1])
   }
 
   const wcMatches = COLORS.filter((c) => {
@@ -206,6 +213,7 @@ function detectRollEvents(state: GameState): GameEvent[] {
       'paschWC',
       wcMatches.map((c) => `${COLOR_NAMES[c]} ${dice[c]}`).join(', '),
       ['white', ...wcMatches],
+      [...new Set(wcMatches.map((c) => dice[c]!))],
     )
   }
 
@@ -250,6 +258,8 @@ export function rollTarget(
   uid: string,
   random: () => number = Math.random,
 ): GameEvent | null {
+  // Zielwürfe sind erst dran, wenn der Zug aufgelöst ist (Kreuze gesetzt).
+  if (state.phase === 'playing' && state.dice) return null
   const e = state.events.find((x) => x.uid === uid)
   if (!e || !e.dice || e.target) return null
   const rule = state.houseRules[e.id]
@@ -400,7 +410,25 @@ function resolveTurn(state: GameState): void {
     state.moves = [null, null]
   }
 
-  state.events = events
+  // Wurf-Events (Pasch, Straße) bleiben erhalten — sie werden erst nach der
+  // Auflösung angezeigt und können danach noch Zielwürfe bekommen.
+  state.events = [...state.events, ...events]
+}
+
+/**
+ * Anzuzeigende Regeltexte für ein Event: Bei Pasch-Events mit konfigurierten
+ * Texten pro Zahl gewinnen diese, sonst der allgemeine Text.
+ */
+export function ruleTextsFor(e: GameEvent, rule: HouseRule): string[] {
+  const out: string[] = []
+  if (e.numbers?.length && rule.numberTexts) {
+    for (const n of e.numbers) {
+      const t = rule.numberTexts[n]?.trim()
+      if (t) out.push(`${n}er-Pasch: ${t}`)
+    }
+  }
+  if (!out.length && rule.text) out.push(rule.text)
+  return out
 }
 
 // ---------------------------------------------------------------------------

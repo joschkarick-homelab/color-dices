@@ -719,3 +719,42 @@ input.code {
 .dot.yellow { background: var(--yellow); }
 .dot.green { background: var(--green); }
 .dot.blue { background: var(--blue); }
+
+/* --- Texte pro Pasch-Zahl (Setup) --- */
+.numrules {
+  margin-top: 10px;
+}
+
+.numrules summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.numrule {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.numrule span {
+  flex-shrink: 0;
+  width: 34px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.numrule input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid #31415f;
+  background: var(--bg2);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+}
