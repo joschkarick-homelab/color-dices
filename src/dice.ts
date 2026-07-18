@@ -88,8 +88,11 @@ export class DiceTray {
     container.appendChild(this.renderer.domElement)
 
     this.scene = new THREE.Scene()
-    this.camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100)
-    this.camera.position.set(0, 13.5, 6.5)
+    // Fast senkrecht von oben mit leichter Neigung: flachere Perspektive
+    // (kleines FOV + mehr Abstand), damit hintere Würfel nicht so weit
+    // weg wirken wie bei der alten Schrägansicht.
+    this.camera = new THREE.PerspectiveCamera(34, 1, 0.1, 100)
+    this.camera.position.set(0, 17, 3.8)
     this.camera.lookAt(0, 0, 0)
 
     const hemi = new THREE.HemisphereLight(0xffffff, 0x334455, 1.1)
