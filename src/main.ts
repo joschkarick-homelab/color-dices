@@ -7,6 +7,7 @@ import {
   EVENT_META,
   LOCK_INDEX,
   MAX_PENALTIES,
+  PASCH_EVENTS,
   ROW_NUMBERS,
   colorCandidates,
   colorSums,
@@ -17,6 +18,7 @@ import {
   rollTarget,
   rowCrossCount,
   rowScore,
+  ruleTextsFor,
   submitMove,
   totalScore,
   whiteCandidates,
@@ -54,6 +56,8 @@ let bannerQueue: GameEvent[] = []
 let bannerActive = false
 let peerConnected = false
 let gameMounted = false
+let reconnecting = false
+let wakeLock: WakeLockSentinel | null = null
 
 // ---------------------------------------------------------------------------
 // Helper
@@ -108,13 +112,66 @@ function loadRules(): HouseRules {
 const isMyTurn = (): boolean => state?.active === myIdx
 
 // ---------------------------------------------------------------------------
+// Verbindung stabil halten
+//
+// Der häufigste Abbruchgrund: Das Gerät des passiven Spielers dimmt/sperrt den
+// Bildschirm, der Browser friert die Seite ein und die WebRTC-Verbindung
+// stirbt nach wenigen Sekunden. Dagegen: Wake Lock (Display bleibt im Spiel
+// an) + automatischer Reconnect des Gasts, falls es doch passiert.
+
+function requestWakeLock(): void {
+  if (!('wakeLock' in navigator)) return
+  navigator.wakeLock.request('screen').then(
+    (lock) => {
+      wakeLock = lock
+    },
+    () => {},
+  )
+}
+
+function releaseWakeLock(): void {
+  void wakeLock?.release().catch(() => {})
+  wakeLock = null
+}
+
+async function autoReconnect(): Promise<void> {
+  const session = loadSession()
+  if (reconnecting || peerConnected || !session || session.role !== 'guest') return
+  if (!state || state.phase === 'ended') return
+  reconnecting = true
+  render()
+  for (let attempt = 0; attempt < 3 && !peerConnected && gameMounted; attempt++) {
+    try {
+      const fresh = await Net.join(session.code)
+      net?.destroy()
+      net = fresh
+      setupGuestHandlers()
+      peerConnected = true
+      fresh.send({ t: 'hello', name: getName() })
+      break
+    } catch {
+      await new Promise((r) => setTimeout(r, 3000))
+    }
+  }
+  reconnecting = false
+  render()
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return
+  // Wake Locks werden beim Verlassen des Tabs automatisch freigegeben
+  if (gameMounted) requestWakeLock()
+  if (net?.role === 'guest' && !peerConnected) void autoReconnect()
+})
+
+// ---------------------------------------------------------------------------
 // Host-Logik
 
 function afterHostChange(): void {
   if (!state || !net) return
   persistHostState()
   net.send({ t: 'state', s: state })
-  queueResolutionEvents()
+  queuePendingBanners()
   render()
 }
 
@@ -177,7 +234,7 @@ function setupGuestHandlers(): void {
       rollRequested = false
       void animateRoll()
     } else {
-      queueResolutionEvents()
+      queuePendingBanners()
       queueTargetAnimations()
       render()
     }
@@ -185,6 +242,7 @@ function setupGuestHandlers(): void {
   net.onPeerDisconnected = () => {
     peerConnected = false
     render()
+    void autoReconnect()
   }
   net.onPeerConnected = () => {
     peerConnected = true
@@ -308,9 +366,8 @@ async function animateRoll(): Promise<void> {
   } finally {
     animating = false
   }
-  queueRollEvents()
+  // Sonderregel-Banner kommen erst nach dem Setzen der Kreuze (Zug-Auflösung)
   render()
-  queueTargetAnimations()
 }
 
 /** Zielwurf abspielen: nur die beteiligten Würfel werden neu geworfen. */
@@ -343,7 +400,7 @@ function showTargetBanner(e: GameEvent): Promise<void> {
       <div class="banner">
         <div class="emoji">🎯</div>
         <h2>Ziel ausgewürfelt!</h2>
-        <p class="who">${meta.emoji} ${esc(meta.title)}</p>
+        <p class="who">${meta.emoji} ${esc(meta.title)}${e.detail ? ` · ${esc(e.detail)}` : ''}</p>
         <div class="target-chips">${chips}</div>
         <div class="tap-hint">Tippen zum Schließen</div>
       </div>`
@@ -358,14 +415,15 @@ function showTargetBanner(e: GameEvent): Promise<void> {
   })
 }
 
-function queueRollEvents(): void {
+/**
+ * Spielfluss: 1. würfeln → 2. Kreuze setzen → 3. Sonderregeln sehen →
+ * 4. Sonderziele auswürfeln. Banner erscheinen deshalb erst, wenn der Zug
+ * aufgelöst ist (solange gewürfelt-aber-nicht-aufgelöst: zurückhalten).
+ */
+function queuePendingBanners(): void {
   if (!state) return
-  enqueueBanners(state.events.filter((e) => !e.uid.includes('-r-')))
-}
-
-function queueResolutionEvents(): void {
-  if (!state) return
-  enqueueBanners(state.events.filter((e) => e.uid.includes('-r-')))
+  if (state.dice && state.phase === 'playing') return
+  enqueueBanners(state.events)
 }
 
 function enqueueBanners(events: GameEvent[]): void {
@@ -402,7 +460,7 @@ function showBanner(e: GameEvent): Promise<void> {
         <h2>${esc(meta.title)}${e.id === 'win' && e.player ? `: ${esc(e.player)}!` : '!'}</h2>
         ${e.player && e.id !== 'win' ? `<p class="who">${esc(e.player)}${e.detail ? ` · ${esc(e.detail)}` : ''}</p>` : ''}
         ${e.id === 'win' && !e.player ? `<p class="who">Unentschieden!</p>` : ''}
-        ${rule?.enabled && rule.text ? `<div class="ruletext">${esc(rule.text)}</div>` : ''}
+        ${rule?.enabled ? ruleTextsFor(e, rule).map((t) => `<div class="ruletext">${esc(t)}</div>`).join('') : ''}
         ${canTarget ? `<div style="height:12px"></div><button class="btn primary" id="bannerTarget">🎯 Ziel auswürfeln</button>` : ''}
         <div class="tap-hint">Tippen zum Schließen</div>
       </div>`
@@ -490,6 +548,19 @@ function showSetup(): void {
               <div class="rule-body" ${r.enabled ? '' : 'style="display:none"'}>
                 <textarea rows="2" data-text placeholder="z. B. Alle trinken einen Schluck …">${esc(r.text)}</textarea>
                 ${
+                  PASCH_EVENTS.includes(id)
+                    ? `<details class="numrules" ${r.numberTexts && Object.keys(r.numberTexts).length ? 'open' : ''}>
+                        <summary>🎲 Eigene Texte pro Pasch-Zahl (optional)</summary>
+                        ${[1, 2, 3, 4, 5, 6]
+                          .map(
+                            (n) =>
+                              `<label class="numrule"><span>${n}er</span><input type="text" data-numtext data-num="${n}" maxlength="120" value="${esc(r.numberTexts?.[n] ?? '')}" placeholder="Standardtext nutzen" /></label>`,
+                          )
+                          .join('')}
+                      </details>`
+                    : ''
+                }
+                ${
                   REROLLABLE_EVENTS.includes(id)
                     ? `<label class="reroll-opt"><input type="checkbox" data-reroll ${r.reroll ? 'checked' : ''} /> 🎯 Ziel auswürfeln? <span class="hint">Die beteiligten Würfel dürfen neu geworfen werden, um Ziele (1–6) zu bestimmen</span></label>`
                     : ''
@@ -520,6 +591,12 @@ function showSetup(): void {
         text: item.querySelector<HTMLTextAreaElement>('[data-text]')!.value.trim(),
         reroll: item.querySelector<HTMLInputElement>('[data-reroll]')?.checked ?? false,
       }
+      const numberTexts: Partial<Record<number, string>> = {}
+      item.querySelectorAll<HTMLInputElement>('[data-numtext]').forEach((inp) => {
+        const v = inp.value.trim()
+        if (v) numberTexts[Number(inp.dataset.num)] = v
+      })
+      if (Object.keys(numberTexts).length) rules[id].numberTexts = numberTexts
     })
     localStorage.setItem('qwixx.rules', JSON.stringify(rules))
     void createGame(rules)
@@ -665,6 +742,7 @@ function showWaiting(msg: string): void {
 
 function mountGame(): void {
   gameMounted = true
+  requestWakeLock()
   app.innerHTML = `
     <div id="game">
       <div class="topbar" id="topbar"></div>
@@ -720,6 +798,7 @@ function onDynClick(ev: Event): void {
     localStorage.removeItem('qwixx.hoststate')
     tray?.dispose()
     tray = null
+    releaseWakeLock()
     showHome()
   } else if (action === 'retry-join') {
     const session = loadSession()
@@ -803,11 +882,13 @@ function renderDyn(): void {
         }
       }
     }
-    // Ausstehende Zielwürfe (Hausregeln mit „Ziel auswürfeln")
+  }
+  // Ausstehende Zielwürfe — erst nach der Zug-Auflösung, bis zum nächsten Wurf
+  if (!animating && s.phase === 'playing' && !s.dice) {
     for (const e of s.events) {
       const rule = s.houseRules[e.id]
       if (e.dice && !e.target && rule.enabled && rule.reroll) {
-        sums += `<button class="sum-chip target-btn" data-action="target" data-uid="${e.uid}">🎯 ${esc(EVENT_META[e.id].title)}: Ziel auswürfeln</button>`
+        sums += `<button class="sum-chip target-btn" data-action="target" data-uid="${e.uid}">🎯 ${esc(EVENT_META[e.id].title)}${e.detail ? ` (${esc(e.detail)})` : ''}: Ziel auswürfeln</button>`
       }
     }
   }
@@ -932,6 +1013,16 @@ function renderGameOver(s: GameState): string {
 }
 
 function renderDisconnected(): string {
+  if (reconnecting) {
+    return `
+      <div class="banner-backdrop" style="z-index:60">
+        <div class="banner">
+          <div class="emoji">📡</div>
+          <h2>Verbindung unterbrochen</h2>
+          <p class="who pulse">Stelle Verbindung wieder her …</p>
+        </div>
+      </div>`
+  }
   return `
     <div class="banner-backdrop" style="z-index:60">
       <div class="banner">
@@ -952,9 +1043,15 @@ function showRulesOverlay(): void {
     .map((id) => {
       const meta = EVENT_META[id]
       const r = state!.houseRules[id]
+      const numTexts = r.numberTexts
+        ? Object.entries(r.numberTexts)
+            .map(([n, t]) => `<p style="margin:6px 0 0;font-size:0.9rem">${n}er: ${esc(t ?? '')}</p>`)
+            .join('')
+        : ''
       return `<div class="rule-item" style="text-align:left">
         <div class="rule-head"><span>${meta.emoji}</span><span class="title">${esc(meta.title)}<span class="hint">${esc(meta.hint)}</span></span></div>
         ${r.text ? `<p style="margin:8px 0 0;font-size:0.95rem">${esc(r.text)}</p>` : ''}
+        ${numTexts}
         ${r.reroll ? `<p style="margin:6px 0 0;font-size:0.8rem;color:var(--muted)">🎯 Ziel wird ausgewürfelt</p>` : ''}
       </div>`
     })
