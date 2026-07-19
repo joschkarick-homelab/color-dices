@@ -1049,6 +1049,34 @@ input.code {
   white-space: nowrap;
 }
 
+/* --- Ziel-Konfiguration (Setup) --- */
+.target-config {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding-left: 6px;
+  border-left: 2px solid #31415f;
+}
+
+.numtoggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  font-size: 0.85rem;
+}
+
+.numtoggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg2);
+  border-radius: 8px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
 /* --- Texte pro Pasch-Zahl (Setup) --- */
 .numrules {
   margin-top: 10px;

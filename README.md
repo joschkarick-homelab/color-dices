@@ -63,9 +63,12 @@ festlegen, der allen angezeigt wird, sobald es eintritt:
 Für die würfelbasierten Events (beide Päsche, beide Straßen) gibt es zusätzlich
 die Option **„🎯 Ziel auswürfeln?"**: Ist sie aktiv, wird nach dem Event ein
 einzelner Zielwürfel geworfen (per Button im Event-Banner oder über den
-🎯-Chip), der eine Zahl von 1–6 bestimmt — z. B. wer wie viel verteilt. Alle
-Handys sehen denselben Zielwert; das Ergebnis samt auslösendem Ereignis und
-Regeltext bleibt stehen, bis es weggetippt wird.
+🎯-Chip), der eine Zahl von 1–6 bestimmt — z. B. wer wie viel verteilt. Bei
+Pasch-Events lässt sich **pro Pasch-Zahl** festlegen, ob ein Ziel ausgewürfelt
+wird (z. B. 1er-Pasch nicht, alle anderen schon), und für jedes Ziel-Ergebnis
+kann ein eigener **Zieltext** definiert werden (z. B. 1 = „Tequila"). Alle
+Handys sehen denselben Zielwert; das Ergebnis samt auslösendem Ereignis,
+Regeltext und Zieltext bleibt stehen, bis es weggetippt wird.
 
 ## Kniffel
 
@@ -152,8 +155,10 @@ Im Homelab-Deployment (Variante B) läuft der **Raum-Server**
 Lobby + Spielstand im Speicher und führt alle Aktionen selbst aus. Dadurch
 sind Verbindungsabbrüche egal: Jeder Client — auch der Raum-Ersteller — kann
 das Handy sperren, die App wechseln oder neu laden und steigt per Client-ID
-nahtlos wieder ein. Räume werden nach längerer Inaktivität aufgeräumt; ein
-Container-Neustart beendet laufende Spiele.
+nahtlos wieder ein. Geht die Client-ID verloren (neuer Tab, PWA statt
+Browser, Browser-Neustart), reicht es, mit dem **bisherigen Namen**
+beizutreten — der freie Platz wird übernommen. Räume werden nach längerer
+Inaktivität aufgeräumt; ein Container-Neustart beendet laufende Spiele.
 
 Ohne Raum-Server (Vite-Dev, GitHub Pages) läuft der P2P-Modus über den
 [PeerServer](https://github.com/peers/peerjs-server) (`peer`-Container,
