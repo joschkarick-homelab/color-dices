@@ -43,7 +43,7 @@ export type EventId =
 export interface HouseRule {
   enabled: boolean
   text: string
-  /** Dürfen nach dem Event die beteiligten Würfel neu geworfen werden, um Ziele zu bestimmen? */
+  /** Darf nach dem Event ein Zielwürfel geworfen werden (bestimmt eine Zahl 1–6)? */
   reroll?: boolean
   /** Eigene Texte je Pasch-Zahl (1–6); Fallback ist `text`. Nur für Pasch-Events. */
   numberTexts?: Partial<Record<number, string>>
@@ -87,8 +87,8 @@ export interface GameEvent {
   id: EventId
   player?: string // Name, falls das Event von einer Person ausgelöst wurde
   detail?: string // z. B. "Rot" bei Reihe zugemacht
-  dice?: DieRef[] // Würfel, die das Event ausgelöst haben (für Zielwürfe)
-  target?: number[] // ausgewürfelte Ziele (parallel zu `dice`), gesetzt nach dem Zielwurf
+  dice?: DieRef[] // Würfel, die das Event ausgelöst haben (macht es zielwurf-fähig)
+  target?: number[] // ausgewürfeltes Ziel: ein einzelner Würfel (1 Element), gesetzt nach dem Zielwurf
   numbers?: number[] // Pasch-Zahl(en) des Events — wählt ggf. den Text aus numberTexts
 }
 
@@ -250,9 +250,9 @@ function detectRollEvents(state: GameState): GameEvent[] {
 }
 
 /**
- * Zielwurf für ein würfelbasiertes Hausregel-Event: Die beteiligten Würfel
- * werden neu geworfen, um Ziele (1–6 je Würfel) zu bestimmen. Pro Event nur
- * einmal möglich. Gibt das aktualisierte Event zurück, sonst null.
+ * Zielwurf für ein würfelbasiertes Hausregel-Event: Ein einzelner Würfel
+ * bestimmt das Ziel (1–6). Pro Event nur einmal möglich. Gibt das
+ * aktualisierte Event zurück, sonst null.
  */
 export function rollTarget(
   state: GameState,
@@ -265,7 +265,7 @@ export function rollTarget(
   if (!e || !e.dice || e.target) return null
   const rule = state.houseRules[e.id]
   if (!rule.enabled || !rule.reroll || !REROLLABLE_EVENTS.includes(e.id)) return null
-  e.target = e.dice.map(() => 1 + Math.floor(random() * 6))
+  e.target = [1 + Math.floor(random() * 6)]
   return e
 }
 
