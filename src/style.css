@@ -880,11 +880,12 @@ input.code {
   opacity: 0.9;
 }
 
-.kdie.held {
-  transform: translateY(4px);
+.kdie.sel {
+  transform: translateY(-4px);
+  background: #fff7d6;
   box-shadow:
     0 0 0 3px var(--accent),
-    0 2px 6px rgba(0, 0, 0, 0.4);
+    0 6px 14px rgba(79, 142, 247, 0.5);
 }
 
 .kdie .klock {

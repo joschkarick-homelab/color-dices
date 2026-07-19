@@ -104,13 +104,16 @@ export function renderKniffelOverlay(
     return
   }
   if (myTurn && s.rollsUsed < MAX_ROLLS) {
-    // Alles festgehalten → es gibt nichts zu würfeln; erst freigeben oder eintragen
+    // Nichts zum Neuwürfeln ausgewählt → erst auswählen (explizite Aktion)
     if (s.dice && s.rollsUsed >= 1 && s.held.every(Boolean)) {
-      el.innerHTML = `<div class="msg bottom">🔒 Alles festgehalten – Würfel freigeben oder eintragen</div>`
+      el.innerHTML = `<div class="msg bottom">👆 Würfel zum Neuwürfeln antippen – oder Kategorie eintragen</div>`
       return
     }
+    const count = s.dice && s.rollsUsed >= 1 ? s.held.filter((h) => !h).length : 5
     const label =
-      s.rollsUsed === 0 ? '🎲 Würfeln' : `🎲 Nochmal würfeln (${s.rollsUsed + 1}/${MAX_ROLLS})`
+      s.rollsUsed === 0
+        ? '🎲 Würfeln'
+        : `🎲 ${count} Würfel neu würfeln (${s.rollsUsed + 1}/${MAX_ROLLS})`
     el.innerHTML = v.rollRequested
       ? `<div class="msg pulse">Würfeln …</div>`
       : `<button class="roll-btn ${s.rollsUsed > 0 ? 'again' : ''}" id="rollBtn">${label}</button>`
@@ -152,25 +155,25 @@ export function renderKniffelDyn(el: HTMLElement, s: KniffelState, v: KniffelVie
         s.rollsUsed === 0
           ? '✨ Du bist am Zug!'
           : s.rollsUsed < MAX_ROLLS
-            ? `Halten & nochmal würfeln – oder eintragen (Wurf ${s.rollsUsed}/${MAX_ROLLS})`
+            ? `Würfel zum Neuwürfeln antippen – oder eintragen (Wurf ${s.rollsUsed}/${MAX_ROLLS})`
             : 'Wähle eine Kategorie zum Eintragen'
     } else {
       turnbar = `${esc(s.names[s.active])} ist am Zug`
     }
   }
 
-  // Würfel-Chips (Halten)
+  // Würfel-Chips: antippen wählt Würfel zum Neuwürfeln aus (Standard: keiner)
   let diceRow = ''
   if (s.dice && !v.animating) {
     const canHold = myTurn && s.rollsUsed >= 1 && s.rollsUsed < MAX_ROLLS
     diceRow = `<div class="kdice">${s.dice
       .map((val, i) => {
-        const held = s.held[i]
-        return `<button class="kdie ${held ? 'held' : ''}" ${
+        const sel = !s.held[i]
+        return `<button class="kdie ${sel ? 'sel' : ''}" ${
           canHold ? `data-action="kdie" data-i="${i}"` : 'disabled'
-        }>${val}${held ? '<span class="klock">🔒</span>' : ''}</button>`
+        }>${val}${sel ? '<span class="klock">🔁</span>' : ''}</button>`
       })
-      .join('')}</div>${canHold ? '<div class="khint">Antippen = festhalten · nochmal antippen = wieder freigeben</div>' : ''}`
+      .join('')}</div>${canHold ? '<div class="khint">Antippen = neu würfeln · der Rest bleibt liegen</div>' : ''}`
   }
 
   // Zettel
