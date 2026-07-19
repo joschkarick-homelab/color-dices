@@ -1,6 +1,7 @@
 // P2P-Verbindung über WebRTC (PeerJS). Die App braucht dadurch keinen eigenen
 // Server: Signalisierung läuft über den öffentlichen PeerJS-Broker, die
-// Spieldaten fließen direkt zwischen den beiden Handys.
+// Spieldaten fließen direkt zwischen den Handys. Der Host hält dabei je eine
+// Verbindung zu jedem Gast (Stern-Topologie).
 
 import { Peer, type DataConnection, type PeerOptions } from 'peerjs'
 import type { GameState, Move } from './rules'
@@ -45,7 +46,10 @@ function peerOptions(): PeerOptions {
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789' // ohne I/L/O/0/1
 
 export type NetMessage =
-  | { t: 'hello'; name: string }
+  | { t: 'hello'; name: string; cid: string } // Gast meldet sich an (auch Reconnect)
+  | { t: 'welcome'; idx: number } // Host teilt dem Gast seinen Spieler-Index mit
+  | { t: 'lobby'; names: string[] } // aktueller Lobby-Stand für alle Gäste
+  | { t: 'full' } // Raum voll oder Spiel läuft bereits
   | { t: 'state'; s: GameState }
   | { t: 'move'; move: Move }
   | { t: 'rollreq' } // Gast ist am Zug und möchte würfeln (Host würfelt)
@@ -60,13 +64,16 @@ export function randomCode(len = 4): string {
 }
 
 export class Net {
-  onMessage: (msg: NetMessage) => void = () => {}
-  onPeerConnected: () => void = () => {}
-  onPeerDisconnected: () => void = () => {}
+  /** `from` identifiziert beim Host die Verbindung; beim Gast immer der Host. */
+  onMessage: (msg: NetMessage, from: number) => void = () => {}
+  onPeerConnected: (id: number) => void = () => {}
+  onPeerDisconnected: (id: number) => void = () => {}
+
+  private conns = new Map<number, DataConnection>()
+  private nextConnId = 1
 
   private constructor(
     private peer: Peer,
-    private conn: DataConnection | null,
     readonly code: string,
     readonly role: 'host' | 'guest',
   ) {
@@ -98,7 +105,7 @@ export class Net {
         const code = attempts === 0 && fixedCode ? fixedCode : randomCode()
         const peer = new Peer(ID_PREFIX + code, peerOptions())
         peer.on('open', () => {
-          const net = new Net(peer, null, code, 'host')
+          const net = new Net(peer, code, 'host')
           peer.on('connection', (conn) => net.attach(conn))
           resolve(net)
         })
@@ -139,7 +146,7 @@ export class Net {
           if (settled) return
           settled = true
           clearTimeout(timeout)
-          const net = new Net(peer, null, code.toUpperCase(), 'guest')
+          const net = new Net(peer, code.toUpperCase(), 'guest')
           net.attach(conn)
           resolve(net)
         })
@@ -160,23 +167,40 @@ export class Net {
   }
 
   private attach(conn: DataConnection): void {
-    // Nur eine Gegenstelle: bestehende Verbindung wird ersetzt (Reconnect).
-    if (this.conn && this.conn.open && this.conn !== conn) this.conn.close()
-    this.conn = conn
-    conn.on('data', (data) => this.onMessage(data as NetMessage))
+    const id = this.nextConnId++
+    this.conns.set(id, conn)
+    conn.on('data', (data) => this.onMessage(data as NetMessage, id))
     conn.on('close', () => {
-      if (this.conn === conn) this.onPeerDisconnected()
+      if (this.conns.get(id) === conn) {
+        this.conns.delete(id)
+        this.onPeerDisconnected(id)
+      }
     })
-    if (conn.open) this.onPeerConnected()
-    else conn.on('open', () => this.onPeerConnected())
+    if (conn.open) this.onPeerConnected(id)
+    else conn.on('open', () => this.onPeerConnected(id))
   }
 
+  /** An alle offenen Verbindungen senden (beim Gast: an den Host). */
   send(msg: NetMessage): void {
-    if (this.conn?.open) this.conn.send(msg)
+    for (const conn of this.conns.values()) {
+      if (conn.open) conn.send(msg)
+    }
+  }
+
+  sendTo(id: number, msg: NetMessage): void {
+    const conn = this.conns.get(id)
+    if (conn?.open) conn.send(msg)
+  }
+
+  /** Verbindung gezielt schließen (z. B. alte Verbindung nach Reconnect). */
+  close(id: number): void {
+    const conn = this.conns.get(id)
+    this.conns.delete(id)
+    conn?.close()
   }
 
   get connected(): boolean {
-    return this.conn?.open ?? false
+    return [...this.conns.values()].some((c) => c.open)
   }
 
   destroy(): void {
