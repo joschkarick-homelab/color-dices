@@ -827,6 +827,227 @@ input.code {
 .dot.green { background: var(--green); }
 .dot.blue { background: var(--blue); }
 
+/* --- Vorlagen-Leiste (Setup) --- */
+.preset-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--panel);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.preset-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.preset-row select,
+.preset-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 12px;
+  font-size: 0.95rem;
+}
+
+.preset-row .btn.small {
+  flex-shrink: 0;
+}
+
+/* --- Kniffel: Würfel-Chips (Halten) --- */
+.kdice {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 12px 2px;
+}
+
+.kdie {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  background: #f5f2ea;
+  color: #111;
+  font-size: 1.5rem;
+  font-weight: 800;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
+  transition: transform 0.08s ease;
+}
+
+.kdie:disabled {
+  opacity: 0.9;
+}
+
+.kdie.held {
+  transform: translateY(4px);
+  box-shadow:
+    0 0 0 3px var(--accent),
+    0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.kdie .klock {
+  position: absolute;
+  right: -6px;
+  top: -8px;
+  font-size: 0.85rem;
+}
+
+.khint {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin: 2px 0 0;
+}
+
+/* --- Kniffel: Zettel --- */
+.ksheet {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 8px 10px 4px;
+}
+
+.ksec {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.khead {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0 4px;
+}
+
+.krow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  background: var(--panel);
+  border-radius: 9px;
+  padding: 8px 10px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: left;
+}
+
+.krow:disabled {
+  opacity: 1;
+}
+
+.krow .kname {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.krow .kpts {
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.krow.done {
+  opacity: 0.65;
+}
+
+.krow.done.zero .kpts {
+  color: #ff8080;
+}
+
+.krow.cand {
+  box-shadow: 0 0 0 2px #fff;
+  cursor: pointer;
+}
+
+.krow.scratchable {
+  box-shadow: 0 0 0 1.5px #d63a3a66;
+  cursor: pointer;
+}
+
+.krow.scratchable .kpts {
+  color: #ff8080;
+}
+
+.krow.selected {
+  box-shadow:
+    0 0 0 3px var(--accent),
+    0 4px 14px rgba(79, 142, 247, 0.7);
+  transform: scale(1.03);
+}
+
+.krow.bonusrow {
+  background: none;
+  border: 1.5px dashed #31415f;
+}
+
+/* --- Kniffel: Mitspieler-Minizettel --- */
+.kmini-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.kmini {
+  background: var(--bg2);
+  border-radius: 7px;
+  padding: 3px 7px;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.kmini b {
+  color: var(--text);
+  margin-left: 3px;
+}
+
+.kmini.open b {
+  color: #55637f;
+}
+
+/* --- Kniffel: Banner-Details --- */
+.kv-line {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 0.95rem;
+}
+
+.die-chip.sm {
+  width: 32px;
+  height: 32px;
+  font-size: 1.1rem;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.roll-btn.again {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 1rem;
+  padding: 10px 20px;
+  animation: none;
+}
+
+.dice-overlay .msg.bottom {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
 /* --- Texte pro Pasch-Zahl (Setup) --- */
 .numrules {
   margin-top: 10px;

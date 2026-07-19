@@ -1,6 +1,32 @@
 import './style.css'
 import { DiceTray, type DieSpec } from './dice'
-import { Net } from './net'
+import { Net, type AnyState, type KniffelAction } from './net'
+import {
+  KNIFFEL_EVENT_META,
+  MAX_ROLLS,
+  TARGET_LABELS,
+  defaultKniffelRules,
+  kniffelRoll,
+  kniffelScore,
+  newKniffelGame,
+  setHeld,
+  type KniffelCategory,
+  type KniffelHouseRules,
+  type KniffelState,
+  type KniffelTarget,
+} from './kniffel'
+import {
+  getSelectedCategory,
+  kniffelRollSpecs,
+  kniffelRulesOverlayHtml,
+  queueKniffelBanners,
+  renderKniffelDyn,
+  renderKniffelOverlay,
+  resetKniffelUi,
+  selectCategory,
+  type KniffelView,
+} from './kniffel-ui'
+import { newPresetId, presetStore, type GameId } from './presets'
 import {
   COLORS,
   COLOR_NAMES,
@@ -51,8 +77,13 @@ interface HostPlayer {
 let net: Net | null = null
 let myIdx = 0
 let hostPlayers: HostPlayer[] = []
+let lobbyGame: GameId = 'qwixx'
 let lobbyRules: HouseRules | null = null
-let state: GameState | null = null
+let kniffelLobbyRules: KniffelHouseRules | null = null
+let state: AnyState | null = null
+
+const isKniffel = (s: AnyState): s is KniffelState => (s as KniffelState).game === 'kniffel'
+const GAME_TITLES: Record<GameId, string> = { qwixx: 'Qwixx', kniffel: 'Kniffel' }
 let tray: DiceTray | null = null
 let selection: { white: Cell | null; colored: Cell | null } = { white: null, colored: null }
 let animating = false
@@ -147,6 +178,16 @@ function loadRules(): HouseRules {
   return defaultHouseRules()
 }
 
+function loadKniffelRules(): KniffelHouseRules {
+  try {
+    const raw = localStorage.getItem('kniffel.rules')
+    if (raw) return { ...defaultKniffelRules(), ...(JSON.parse(raw) as KniffelHouseRules) }
+  } catch {
+    /* ignore */
+  }
+  return defaultKniffelRules()
+}
+
 const isMyTurn = (): boolean => state?.active === myIdx
 
 // ---------------------------------------------------------------------------
@@ -214,11 +255,43 @@ function afterHostChange(): void {
 }
 
 function hostRoll(): void {
-  if (!state || state.phase !== 'playing' || state.dice) return
+  if (!state || isKniffel(state) || state.phase !== 'playing' || state.dice) return
   rollDice(state)
   persistHostState()
   net?.send({ t: 'state', s: state })
   void animateRoll()
+}
+
+// --- Kniffel: Host führt alle Aktionen aus ---
+
+function kniffelHostRoll(hold: boolean[]): void {
+  if (!state || !isKniffel(state)) return
+  if (kniffelRoll(state, hold)) {
+    persistHostState()
+    net?.send({ t: 'state', s: state })
+    void animateRoll()
+  }
+}
+
+function kniffelHostHold(hold: boolean[]): void {
+  if (!state || !isKniffel(state)) return
+  if (setHeld(state, hold)) {
+    persistHostState()
+    net?.send({ t: 'state', s: state })
+    render()
+  }
+}
+
+function kniffelHostScore(cat: KniffelCategory): void {
+  if (!state || !isKniffel(state)) return
+  if (kniffelScore(state, cat)) afterHostChange()
+}
+
+function handleKniffelAct(a: KniffelAction, idx: number): void {
+  if (!state || !isKniffel(state) || state.active !== idx) return
+  if (a.k === 'roll') kniffelHostRoll(a.hold)
+  else if (a.k === 'hold') kniffelHostHold(a.hold)
+  else if (a.k === 'score') kniffelHostScore(a.cat)
 }
 
 function hostConnectedCount(): number {
@@ -260,7 +333,7 @@ function hostHandleHello(m: { name: string; cid: string }, from: number): void {
 }
 
 function broadcastLobby(): void {
-  net?.send({ t: 'lobby', names: hostPlayers.map((p) => p.name) })
+  net?.send({ t: 'lobby', names: hostPlayers.map((p) => p.name), game: lobbyGame })
 }
 
 function setupHostHandlers(): void {
@@ -273,6 +346,11 @@ function setupHostHandlers(): void {
     if (!state) return
     const idx = hostPlayers.findIndex((p) => p.connId === from)
     if (idx <= 0) return
+    if (m.t === 'act') {
+      handleKniffelAct(m.a, idx)
+      return
+    }
+    if (isKniffel(state)) return
     if (m.t === 'move') {
       submitMove(state, idx, m.move)
       afterHostChange()
@@ -311,7 +389,7 @@ function setupGuestHandlers(): void {
       return
     }
     if (m.t === 'lobby') {
-      if (!state) showGuestLobby(m.names)
+      if (!state) showGuestLobby(m.names, m.game)
       return
     }
     if (m.t === 'full') {
@@ -327,8 +405,12 @@ function setupGuestHandlers(): void {
     if (!prev || prev.matchNo !== state.matchNo) {
       // Erster Stand oder Revanche: Events/Animationen zurücksetzen
       selection = { white: null, colored: null }
-      shownEvents = new Set(prev ? [] : state.events.map((e) => e.uid))
-      shownTargets = new Set(prev ? [] : state.events.filter((e) => e.target).map((e) => e.uid))
+      const uids = prev ? [] : state.events.map((e) => e.uid)
+      shownEvents = new Set(uids)
+      resetKniffelUi(uids)
+      shownTargets = new Set(
+        prev || isKniffel(state) ? [] : state.events.filter((e) => e.target).map((e) => e.uid),
+      )
       lastAnimatedRollId = prev ? 0 : state.rollId
       submittedRollId = 0
     }
@@ -358,7 +440,19 @@ function setupGuestHandlers(): void {
 // Gemeinsame Spiel-Aktionen
 
 function requestRoll(): void {
-  if (!state || !isMyTurn() || state.dice || animating) return
+  if (!state || !isMyTurn() || animating) return
+  if (isKniffel(state)) {
+    if (state.rollsUsed >= MAX_ROLLS) return
+    if (net?.role === 'host') {
+      kniffelHostRoll(state.held)
+    } else {
+      rollRequested = true
+      net?.send({ t: 'act', a: { k: 'roll', hold: state.held } })
+      render()
+    }
+    return
+  }
+  if (state.dice) return
   if (net?.role === 'host') {
     hostRoll()
   } else {
@@ -368,8 +462,38 @@ function requestRoll(): void {
   }
 }
 
+/** Kniffel: Würfel zwischen den Würfen festhalten/freigeben. */
+function toggleHold(i: number): void {
+  if (!state || !isKniffel(state) || animating) return
+  if (state.active !== myIdx || !state.dice) return
+  if (state.rollsUsed < 1 || state.rollsUsed >= MAX_ROLLS) return
+  const hold = [...state.held]
+  hold[i] = !hold[i]
+  if (net?.role === 'host') {
+    kniffelHostHold(hold)
+  } else {
+    state.held = hold // optimistisch — Host bestätigt per Broadcast
+    render()
+    net?.send({ t: 'act', a: { k: 'hold', hold } })
+  }
+}
+
+/** Kniffel: gewählte Kategorie eintragen. */
+function kniffelConfirmScore(): void {
+  if (!state || !isKniffel(state) || animating) return
+  if (state.active !== myIdx || !state.dice) return
+  const cat = getSelectedCategory()
+  if (!cat) return
+  selectCategory(null)
+  if (net?.role === 'host') {
+    kniffelHostScore(cat)
+  } else {
+    net?.send({ t: 'act', a: { k: 'score', cat } })
+  }
+}
+
 function hostRollTarget(uid: string): void {
-  if (!state) return
+  if (!state || isKniffel(state)) return
   const e = rollTarget(state, uid)
   if (!e) return
   persistHostState()
@@ -388,13 +512,13 @@ function requestTarget(uid: string): void {
 
 /** Noch nicht animierte Zielwürfe abspielen (Guard: shownTargets). */
 function queueTargetAnimations(): void {
-  if (!state || animating) return
+  if (!state || isKniffel(state) || animating) return
   const pending = state.events.find((e) => e.target && !shownTargets.has(e.uid))
   if (pending) void animateTarget(pending)
 }
 
 function confirmMove(): void {
-  if (!state || !state.dice || animating) return
+  if (!state || isKniffel(state) || !state.dice || animating) return
   const move = { white: selection.white, colored: selection.colored }
   submittedRollId = state.rollId
   if (net?.role === 'host') {
@@ -407,12 +531,12 @@ function confirmMove(): void {
 }
 
 function myMoveDone(): boolean {
-  if (!state) return false
+  if (!state || isKniffel(state)) return false
   return state.moves[myIdx] !== null || submittedRollId === state.rollId
 }
 
 function handleCellTap(color: Color, index: number): void {
-  if (!state || !state.dice || animating || myMoveDone()) return
+  if (!state || isKniffel(state) || !state.dice || animating || myMoveDone()) return
   const isSel = (c: Cell | null): boolean => c?.color === color && c.index === index
 
   if (isSel(selection.white)) {
@@ -446,7 +570,8 @@ function handleCellTap(color: Color, index: number): void {
 // Würfel-Animation & Event-Banner
 
 function buildSpecs(): DieSpec[] {
-  const d = state!.dice!
+  if (isKniffel(state!)) return kniffelRollSpecs(state as KniffelState)
+  const d = (state as GameState).dice!
   const specs: DieSpec[] = [
     { kind: 'white', value: d.w1 },
     { kind: 'white', value: d.w2 },
@@ -499,7 +624,7 @@ async function animateTarget(e: GameEvent): Promise<void> {
 function showTargetBanner(e: GameEvent): Promise<void> {
   return new Promise((resolve) => {
     const meta = EVENT_META[e.id]
-    const rule = state?.houseRules[e.id]
+    const rule = state && !isKniffel(state) ? state.houseRules[e.id] : undefined
     const chips = e.target!.map((v) => `<span class="die-chip white">${v}</span>`).join('')
     const el = document.createElement('div')
     el.className = 'banner-backdrop'
@@ -527,6 +652,17 @@ function showTargetBanner(e: GameEvent): Promise<void> {
  */
 function queuePendingBanners(): void {
   if (!state) return
+  if (isKniffel(state)) {
+    queueKniffelBanners(state, {
+      tray,
+      getAnimating: () => animating,
+      setAnimating: (b) => {
+        animating = b
+      },
+      render,
+    })
+    return
+  }
   if (state.dice && state.phase === 'playing') return
   enqueueBanners(state.events)
 }
@@ -553,7 +689,7 @@ async function processBannerQueue(): Promise<void> {
 function showBanner(e: GameEvent): Promise<void> {
   return new Promise((resolve) => {
     const meta = EVENT_META[e.id]
-    const rule = state?.houseRules[e.id]
+    const rule = state && !isKniffel(state) ? state.houseRules[e.id] : undefined
     const canTarget = Boolean(
       e.dice && !e.target && rule?.enabled && rule.reroll && REROLLABLE_EVENTS.includes(e.id),
     )
@@ -601,7 +737,8 @@ function showHome(error = ''): void {
         <input type="text" id="name" placeholder="Dein Name" maxlength="16" value="${esc(getName())}" />
         <label class="field-label" for="gameSel">Spiel auswählen</label>
         <select id="gameSel" class="game-select">
-          <option value="qwixx" selected>Qwixx</option>
+          <option value="qwixx" ${lobbyGame === 'qwixx' ? 'selected' : ''}>Qwixx</option>
+          <option value="kniffel" ${lobbyGame === 'kniffel' ? 'selected' : ''}>Kniffel</option>
         </select>
         <p class="error">${esc(error)}</p>
         <button class="btn primary" id="create">Neues Spiel erstellen</button>
@@ -624,7 +761,10 @@ function showHome(error = ''): void {
     return n
   }
   app.querySelector('#create')!.addEventListener('click', () => {
-    if (requireName()) showSetup()
+    if (!requireName()) return
+    lobbyGame = app.querySelector<HTMLSelectElement>('#gameSel')!.value as GameId
+    if (lobbyGame === 'kniffel') showKniffelSetup()
+    else showSetup()
   })
   app.querySelector('#join')!.addEventListener('click', () => {
     if (requireName()) showJoin(joinParam ?? '')
@@ -635,13 +775,81 @@ function showHome(error = ''): void {
   if (joinParam && getName()) showJoin(joinParam)
 }
 
-function showSetup(): void {
-  const rules = loadRules()
+// ---------------------------------------------------------------------------
+// Hausregel-Vorlagen (aktuell global auf dem Gerät, später user-gebunden —
+// siehe presets.ts)
+
+function presetBarHtml(): string {
+  return `
+    <div class="preset-bar">
+      <div class="preset-row">
+        <select id="presetSel" class="game-select"><option value="">Vorlage wählen …</option></select>
+        <button class="btn small" id="presetLoad">Laden</button>
+        <button class="btn small" id="presetDel" title="Vorlage löschen">🗑️</button>
+      </div>
+      <div class="preset-row">
+        <input type="text" id="presetName" placeholder="Name der Vorlage" maxlength="24" />
+        <button class="btn small" id="presetSave">💾 Speichern</button>
+      </div>
+    </div>`
+}
+
+function wirePresetBar<T>(game: GameId, collect: () => T, apply: (rules: T) => void): void {
+  const sel = app.querySelector<HTMLSelectElement>('#presetSel')!
+  const nameInput = app.querySelector<HTMLInputElement>('#presetName')!
+  const refresh = async (selectId?: string): Promise<void> => {
+    const presets = await presetStore.list(game)
+    sel.innerHTML =
+      `<option value="">Vorlage wählen …</option>` +
+      presets.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')
+    if (selectId) sel.value = selectId
+  }
+  void refresh()
+  sel.addEventListener('change', () => {
+    const opt = sel.selectedOptions[0]
+    if (opt?.value) nameInput.value = opt.textContent ?? ''
+  })
+  app.querySelector('#presetLoad')!.addEventListener('click', () => {
+    void (async () => {
+      const presets = await presetStore.list(game)
+      const p = presets.find((x) => x.id === sel.value)
+      if (p) apply(p.rules as T)
+    })()
+  })
+  app.querySelector('#presetDel')!.addEventListener('click', () => {
+    void (async () => {
+      if (!sel.value) return
+      await presetStore.remove(sel.value)
+      await refresh()
+    })()
+  })
+  app.querySelector('#presetSave')!.addEventListener('click', () => {
+    void (async () => {
+      const name = nameInput.value.trim()
+      if (!name) return
+      const presets = await presetStore.list(game)
+      const id = presets.find((p) => p.name === name)?.id ?? newPresetId()
+      await presetStore.save({
+        id,
+        name,
+        game,
+        owner: null, // aktuell global — später die ID des angemeldeten Users
+        updatedAt: Date.now(),
+        rules: collect(),
+      })
+      await refresh(id)
+    })()
+  })
+}
+
+function showSetup(initial?: HouseRules): void {
+  const rules = initial ?? loadRules()
   const ids = Object.keys(EVENT_META) as (keyof typeof EVENT_META)[]
   app.innerHTML = `
     <div class="screen">
       <h1 style="font-size:1.6rem">Eure Regeln 📜</h1>
-      <p class="subtitle">Was passiert bei besonderen Ereignissen? Der Text wird beiden angezeigt, sobald das Ereignis eintritt.</p>
+      <p class="subtitle">Was passiert bei besonderen Ereignissen? Der Text wird allen angezeigt, sobald das Ereignis eintritt.</p>
+      ${presetBarHtml()}
       <div class="rules-list">
         ${ids
           .map((id) => {
@@ -690,12 +898,11 @@ function showSetup(): void {
       body.style.display = toggle.checked ? '' : 'none'
     })
   })
-  app.querySelector('#back')!.addEventListener('click', () => showHome())
-  app.querySelector('#start')!.addEventListener('click', () => {
-    const rules = {} as HouseRules
+  const collect = (): HouseRules => {
+    const out = {} as HouseRules
     app.querySelectorAll<HTMLElement>('.rule-item').forEach((item) => {
       const id = item.dataset.id as keyof HouseRules
-      rules[id] = {
+      out[id] = {
         enabled: item.querySelector<HTMLInputElement>('[data-toggle]')!.checked,
         text: item.querySelector<HTMLTextAreaElement>('[data-text]')!.value.trim(),
         reroll: item.querySelector<HTMLInputElement>('[data-reroll]')?.checked ?? false,
@@ -705,14 +912,108 @@ function showSetup(): void {
         const v = inp.value.trim()
         if (v) numberTexts[Number(inp.dataset.num)] = v
       })
-      if (Object.keys(numberTexts).length) rules[id].numberTexts = numberTexts
+      if (Object.keys(numberTexts).length) out[id].numberTexts = numberTexts
     })
+    return out
+  }
+  wirePresetBar<HouseRules>('qwixx', collect, (r) => showSetup({ ...defaultHouseRules(), ...r }))
+  app.querySelector('#back')!.addEventListener('click', () => showHome())
+  app.querySelector('#start')!.addEventListener('click', () => {
+    const rules = collect()
     localStorage.setItem('qwixx.rules', JSON.stringify(rules))
-    void createGame(rules)
+    lobbyRules = rules
+    void createGame()
   })
 }
 
-async function createGame(rules: HouseRules): Promise<void> {
+// ---------------------------------------------------------------------------
+// Kniffel-Setup: Ereignis → Zielperson → Aktion (mit Würfel-Varianz)
+
+function showKniffelSetup(initial?: KniffelHouseRules): void {
+  const rules = initial ?? loadKniffelRules()
+  const ids = Object.keys(KNIFFEL_EVENT_META) as (keyof typeof KNIFFEL_EVENT_META)[]
+  app.innerHTML = `
+    <div class="screen">
+      <h1 style="font-size:1.6rem">Kniffel-Hausregeln 📜</h1>
+      <p class="subtitle">Wer ist betroffen, was passiert – und was würfelt das Schicksal dazu aus? Der Text steht hinter der betroffenen Person, z. B. „trinkt einen Schluck".</p>
+      ${presetBarHtml()}
+      <div class="rules-list">
+        ${ids
+          .map((id) => {
+            const meta = KNIFFEL_EVENT_META[id]
+            const r = rules[id]
+            const targetOpts = (Object.keys(TARGET_LABELS) as KniffelTarget[])
+              .map((t) => `<option value="${t}" ${r.target === t ? 'selected' : ''}>${esc(TARGET_LABELS[t])}</option>`)
+              .join('')
+            return `
+            <div class="rule-item" data-id="${id}">
+              <div class="rule-head">
+                <span>${meta.emoji}</span>
+                <span class="title">${esc(meta.title)}<span class="hint">${esc(meta.hint)}</span></span>
+                <label class="switch"><input type="checkbox" data-toggle ${r.enabled ? 'checked' : ''} /><span></span></label>
+              </div>
+              <div class="rule-body" ${r.enabled ? '' : 'style="display:none"'}>
+                <label class="field-label">Wen trifft es?</label>
+                <select class="game-select" data-target>${targetOpts}</select>
+                <textarea rows="2" data-text placeholder="z. B. trinkt einen Schluck …">${esc(r.text)}</textarea>
+                <label class="reroll-opt"><input type="checkbox" data-count ${r.rollCount ? 'checked' : ''} /> 🎲 Anzahl auswürfeln <span class="hint">Ein Würfel bestimmt, wie oft (1–6)</span></label>
+                <details class="numrules" ${r.tableOn ? 'open' : ''}>
+                  <summary>🎲 Würfeltabelle – der Würfel wählt einen Eintrag</summary>
+                  <label class="reroll-opt"><input type="checkbox" data-tableon ${r.tableOn ? 'checked' : ''} /> Tabelle aktiv <span class="hint">z. B. welcher Shot: leere Felder = Glück gehabt</span></label>
+                  ${[0, 1, 2, 3, 4, 5]
+                    .map(
+                      (i) =>
+                        `<label class="numrule"><span>🎲 ${i + 1}</span><input type="text" data-tbl data-num="${i}" maxlength="60" value="${esc(r.table[i] ?? '')}" placeholder="leer" /></label>`,
+                    )
+                    .join('')}
+                </details>
+              </div>
+            </div>`
+          })
+          .join('')}
+      </div>
+      <button class="btn primary" id="start">Spiel erstellen</button>
+      <button class="btn" id="back">Zurück</button>
+    </div>`
+
+  app.querySelectorAll<HTMLInputElement>('[data-toggle]').forEach((toggle) => {
+    toggle.addEventListener('change', () => {
+      const body = toggle.closest('.rule-item')!.querySelector<HTMLElement>('.rule-body')!
+      body.style.display = toggle.checked ? '' : 'none'
+    })
+  })
+  const collect = (): KniffelHouseRules => {
+    const out = {} as KniffelHouseRules
+    app.querySelectorAll<HTMLElement>('.rule-item').forEach((item) => {
+      const id = item.dataset.id as keyof KniffelHouseRules
+      const table: string[] = ['', '', '', '', '', '']
+      item.querySelectorAll<HTMLInputElement>('[data-tbl]').forEach((inp) => {
+        table[Number(inp.dataset.num)] = inp.value.trim()
+      })
+      out[id] = {
+        enabled: item.querySelector<HTMLInputElement>('[data-toggle]')!.checked,
+        text: item.querySelector<HTMLTextAreaElement>('[data-text]')!.value.trim(),
+        target: item.querySelector<HTMLSelectElement>('[data-target]')!.value as KniffelTarget,
+        rollCount: item.querySelector<HTMLInputElement>('[data-count]')!.checked,
+        tableOn: item.querySelector<HTMLInputElement>('[data-tableon]')!.checked,
+        table,
+      }
+    })
+    return out
+  }
+  wirePresetBar<KniffelHouseRules>('kniffel', collect, (r) =>
+    showKniffelSetup({ ...defaultKniffelRules(), ...r }),
+  )
+  app.querySelector('#back')!.addEventListener('click', () => showHome())
+  app.querySelector('#start')!.addEventListener('click', () => {
+    const collected = collect()
+    localStorage.setItem('kniffel.rules', JSON.stringify(collected))
+    kniffelLobbyRules = collected
+    void createGame()
+  })
+}
+
+async function createGame(): Promise<void> {
   showWaiting('Raum wird erstellt …')
   net?.destroy()
   try {
@@ -722,7 +1023,6 @@ async function createGame(rules: HouseRules): Promise<void> {
     return
   }
   myIdx = 0
-  lobbyRules = rules
   hostPlayers = [{ cid: 'host', name: getName(), connId: null }]
   persistHostPlayers()
   saveSession({ role: 'host', code: net.code, name: getName() })
@@ -737,7 +1037,7 @@ function showHostLobby(): void {
   const url = `${location.origin}${location.pathname}?join=${code}`
   app.innerHTML = `
     <div class="screen center">
-      <p class="subtitle">Dein Raum-Code</p>
+      <p class="subtitle">${esc(GAME_TITLES[lobbyGame])} · Dein Raum-Code</p>
       <div class="code-display">${esc(code)}</div>
       <div class="player-list">
         ${hostPlayers
@@ -762,9 +1062,9 @@ function showHostLobby(): void {
     </div>`
   app.querySelector('#start')!.addEventListener('click', hostStartGame)
   app.querySelector('#share')!.addEventListener('click', () => {
-    const text = `Spiel eine Runde Qwixx mit mir! Code: ${code}`
+    const text = `Spiel eine Runde ${GAME_TITLES[lobbyGame]} mit mir! Code: ${code}`
     if (navigator.share) {
-      void navigator.share({ title: 'Qwixx', text, url })
+      void navigator.share({ title: GAME_TITLES[lobbyGame], text, url })
     } else {
       void navigator.clipboard.writeText(`${text}\n${url}`)
       alert('Link kopiert!')
@@ -782,10 +1082,13 @@ function showHostLobby(): void {
 
 function hostStartGame(): void {
   if (!net || state) return
-  state = newGame(
-    hostPlayers.map((p) => p.name),
-    lobbyRules ?? loadRules(),
-  )
+  const names = hostPlayers.map((p) => p.name)
+  if (lobbyGame === 'kniffel') {
+    state = newKniffelGame(names, kniffelLobbyRules ?? loadKniffelRules())
+    resetKniffelUi([])
+  } else {
+    state = newGame(names, lobbyRules ?? loadRules())
+  }
   peerConnected = true
   persistHostState()
   net.send({ t: 'state', s: state })
@@ -794,12 +1097,12 @@ function hostStartGame(): void {
 }
 
 /** Warte-Lobby des Gasts: zeigt die bereits beigetretenen Spieler. */
-function showGuestLobby(names: string[]): void {
+function showGuestLobby(names: string[], game: GameId): void {
   gameMounted = false
   app.innerHTML = `
     <div class="screen center">
       <div class="logo-dice">🎲</div>
-      <p class="subtitle">Du bist drin!</p>
+      <p class="subtitle">Du bist drin! Gespielt wird: <b>${esc(GAME_TITLES[game] ?? game)}</b></p>
       <div class="player-list">
         ${names
           .map(
@@ -881,9 +1184,14 @@ async function resumeSession(session: Session): Promise<void> {
     savedPlayers && savedPlayers.length === saved.names.length
       ? savedPlayers.map((p) => ({ ...p, connId: null }))
       : saved.names.map((n, i) => ({ cid: i === 0 ? 'host' : `unknown-${i}`, name: n, connId: null }))
+  lobbyGame = isKniffel(state) ? 'kniffel' : 'qwixx'
   lastAnimatedRollId = state.rollId
-  shownEvents = new Set(state.events.map((e) => e.uid))
-  shownTargets = new Set(state.events.filter((e) => e.target).map((e) => e.uid))
+  const uids = state.events.map((e) => e.uid)
+  shownEvents = new Set(uids)
+  resetKniffelUi(uids)
+  shownTargets = new Set(
+    isKniffel(state) ? [] : state.events.filter((e) => e.target).map((e) => e.uid),
+  )
   saveSession({ role: 'host', code: net.code, name: session.name })
   setupHostHandlers()
   mountGame()
@@ -937,6 +1245,14 @@ function onDynClick(ev: Event): void {
     confirmMove()
   } else if (action === 'target') {
     requestTarget(target.dataset.uid!)
+  } else if (action === 'kdie') {
+    toggleHold(Number(target.dataset.i))
+  } else if (action === 'kcat') {
+    const cat = target.dataset.cat as KniffelCategory
+    selectCategory(getSelectedCategory() === cat ? null : cat)
+    render()
+  } else if (action === 'kconfirm') {
+    kniffelConfirmScore()
   } else if (action === 'mute') {
     if (tray) {
       tray.muted = !tray.muted
@@ -947,12 +1263,15 @@ function onDynClick(ev: Event): void {
     showRulesOverlay()
   } else if (action === 'rematch') {
     if (state && net?.role === 'host') {
-      state = newGame(state.names, state.houseRules, state.matchNo + 1)
+      state = isKniffel(state)
+        ? newKniffelGame(state.names, state.houseRules, state.matchNo + 1)
+        : newGame(state.names, state.houseRules, state.matchNo + 1)
       selection = { white: null, colored: null }
       lastAnimatedRollId = 0
       submittedRollId = 0
       shownEvents = new Set()
       shownTargets = new Set()
+      resetKniffelUi([])
       afterHostChange()
     }
   } else if (action === 'leave') {
@@ -993,10 +1312,11 @@ function renderTopbar(): void {
   } else if (n > 1) {
     connInfo = `<span>· 👥 ${n}</span>`
   }
+  const roundInfo = isKniffel(state) ? `Runde ${state.round}/13` : `Runde ${state.turn}`
   el.innerHTML = `
     <span class="conn-dot ${dotOk ? 'ok' : ''}"></span>
     <span>Raum ${esc(net?.code ?? '')}</span>
-    <span>· Runde ${state.turn}</span>
+    <span>· ${roundInfo}</span>
     ${connInfo}
     <span class="spacer"></span>
     <button class="icon-btn" data-action="rules" title="Hausregeln">📜</button>
@@ -1013,6 +1333,10 @@ function renderDiceOverlay(): void {
     return
   }
   el.style.pointerEvents = ''
+  if (isKniffel(state)) {
+    renderKniffelOverlay(el, state, kniffelView(), requestRoll)
+    return
+  }
   if (state.phase === 'playing' && !state.dice) {
     if (isMyTurn()) {
       el.innerHTML = rollRequested
@@ -1030,9 +1354,25 @@ function renderDiceOverlay(): void {
   }
 }
 
+function kniffelView(): KniffelView {
+  return {
+    myIdx,
+    animating,
+    rollRequested,
+    isHost: net?.role === 'host',
+    peerConnected,
+  }
+}
+
 function renderDyn(): void {
   const el = document.getElementById('gameDyn')
   if (!el || !state) return
+  if (isKniffel(state)) {
+    const extraOverlay =
+      net?.role === 'guest' && !peerConnected && state.phase !== 'ended' ? renderDisconnected() : ''
+    renderKniffelDyn(el, state, kniffelView(), extraOverlay)
+    return
+  }
   const s = state
   const myCard = s.cards[myIdx]
   const others = s.names.map((_, i) => i).filter((i) => i !== myIdx)
@@ -1250,11 +1590,25 @@ function renderDisconnected(): string {
 
 function showRulesOverlay(): void {
   if (!state) return
+  if (isKniffel(state)) {
+    const el = document.createElement('div')
+    el.className = 'banner-backdrop'
+    el.innerHTML = `
+      <div class="banner" style="max-height:80dvh;overflow-y:auto">
+        <h2>📜 Eure Hausregeln</h2>
+        <div class="rules-list" style="margin-top:10px">${kniffelRulesOverlayHtml(state)}</div>
+        <div class="tap-hint">Tippen zum Schließen</div>
+      </div>`
+    el.addEventListener('click', () => el.remove())
+    document.body.appendChild(el)
+    return
+  }
+  const qstate = state
   const items = (Object.keys(EVENT_META) as (keyof typeof EVENT_META)[])
-    .filter((id) => state!.houseRules[id].enabled)
+    .filter((id) => qstate.houseRules[id].enabled)
     .map((id) => {
       const meta = EVENT_META[id]
-      const r = state!.houseRules[id]
+      const r = qstate.houseRules[id]
       const numTexts = r.numberTexts
         ? Object.entries(r.numberTexts)
             .map(([n, t]) => `<p style="margin:6px 0 0;font-size:0.9rem">${n}er: ${esc(t ?? '')}</p>`)
