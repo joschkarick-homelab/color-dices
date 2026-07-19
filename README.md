@@ -1,24 +1,31 @@
-# 🎲 Qwixx
+# 🎲 Würfelrunde
 
-Qwixx für 2 Spieler:innen — jede:r am eigenen Handy im Browser. Mit physikalisch
-simulierten 3D-Würfeln (three.js + cannon-es) und frei konfigurierbaren
-Hausregeln für Päsche, Straßen & Co.
+Würfelspiele für **1–10 Spieler:innen** — jede:r am eigenen Handy im Browser.
+Erstes Spiel: **Qwixx**, weitere (z. B. Kniffel) sind vorbereitet und über die
+Spielauswahl auf der Startseite erweiterbar. Mit physikalisch simulierten
+3D-Würfeln (three.js + cannon-es) und frei konfigurierbaren Hausregeln für
+Päsche, Straßen & Co.
 
 ## Spielen
 
-1. **Spieler 1** öffnet die App, gibt seinen Namen ein und tippt auf
-   **„Neues Spiel erstellen"**, legt die Hausregeln fest und teilt den
-   4-stelligen Raum-Code (oder den Einladungslink).
-2. **Spieler 2** öffnet die App und tritt mit dem Code bei.
-3. Losgewürfelt! Die beiden Handys verbinden sich **direkt per WebRTC**
-   (P2P) — es läuft kein Spielserver, nur die Signalisierung geht über den
-   kostenlosen öffentlichen [PeerJS](https://peerjs.com)-Broker.
+1. **Der Host** öffnet die App, gibt seinen Namen ein, wählt das Spiel aus,
+   tippt auf **„Neues Spiel erstellen"**, legt die Hausregeln fest und teilt
+   den 4-stelligen Raum-Code (oder den Einladungslink).
+2. **Die Mitspieler:innen** treten mit dem Code bei. Der Host sieht in der
+   Lobby, wer schon da ist, und startet das Spiel, sobald er möchte —
+   auch solo oder mit bis zu 9 Gästen.
+3. Losgewürfelt! Die Handys verbinden sich **direkt per WebRTC** (P2P,
+   Stern-Topologie über den Host) — es läuft kein Spielserver, nur die
+   Signalisierung geht über den kostenlosen öffentlichen
+   [PeerJS](https://peerjs.com)-Broker.
+4. Im Spiel einfach nach unten scrollen, um die Boards aller Mitspieler:innen
+   und deren Fortschritt zu sehen.
 
 ### Regeln
 
 Implementiert sind die Original-Qwixx-Regeln:
 
-- Der aktive Spieler würfelt alle Würfel. **Beide** dürfen die Summe der
+- Der aktive Spieler würfelt alle Würfel. **Alle** dürfen die Summe der
   weißen Würfel in einer beliebigen Reihe ankreuzen.
 - Nur der **aktive** Spieler darf zusätzlich einen weißen mit einem farbigen
   Würfel kombinieren (erst weiß, dann farbig).
@@ -33,7 +40,7 @@ Implementiert sind die Original-Qwixx-Regeln:
 ### Hausregeln 📜
 
 Beim Erstellen des Spiels lässt sich für jedes Ereignis ein eigener Text
-festlegen, der beiden angezeigt wird, sobald es eintritt:
+festlegen, der allen angezeigt wird, sobald es eintritt:
 
 | Ereignis | Auslöser |
 |---|---|
@@ -49,12 +56,12 @@ Für die würfelbasierten Events (beide Päsche, beide Straßen) gibt es zusätz
 die Option **„🎯 Ziel auswürfeln?"**: Ist sie aktiv, können nach dem Event die
 beteiligten Würfel einmal neu geworfen werden (per Button im Event-Banner oder
 über den 🎯-Chip), um Ziele von 1–6 zu bestimmen — z. B. wer wie viel verteilt.
-Beide Handys sehen dieselben Zielwerte.
+Alle Handys sehen dieselben Zielwerte.
 
 ### Die Würfel 🎲
 
 Jeder Wurf wird mit einer echten Starrkörper-Physiksimulation gewürfelt
-(cannon-es), inklusive Kollisionen, Stapeln und Sound. Damit beide Handys
+(cannon-es), inklusive Kollisionen, Stapeln und Sound. Damit alle Handys
 trotz unabhängiger Simulation **dieselben Augenzahlen** sehen, entscheidet
 der Host die Werte; die Simulation läuft zuerst unsichtbar durch, dann werden
 die Würfelseiten passend belegt und der Wurf sichtbar abgespielt. Schief
