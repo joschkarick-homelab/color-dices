@@ -8,9 +8,16 @@ services:
       - "${HOST_PORT:-8090}:80"
     depends_on:
       - peer
+      - rooms
 
-  # Eigener PeerJS-Broker für die Signalisierung — erreichbar nur über den
-  # /peer-Proxy im nginx der App, kein eigener veröffentlichter Port.
+  # Raum-Server: hält Spielstände serverseitig — erreichbar nur über den
+  # /rooms-Proxy im nginx der App. Verbindungsabbrüche (Standby, App-Wechsel)
+  # sind damit unkritisch: Beim Wiederverbinden kommt der Stand vom Server.
+  rooms:
+    image: ghcr.io/joschkarick-homelab/color-dices:rooms
+    restart: unless-stopped
+
+  # PeerJS-Broker als P2P-Fallback (z. B. für ältere Clients)
   peer:
     image: peerjs/peerjs-server:latest
     restart: unless-stopped

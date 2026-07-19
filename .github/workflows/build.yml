@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "src/**"
+      - "server/**"
+      - "public/**"
       - "index.html"
       - "package.json"
       - "package-lock.json"
@@ -47,12 +49,23 @@ jobs:
             type=sha,prefix=
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
-      - name: Build and push
+      - name: Build and push (web)
         uses: docker/build-push-action@v6
         with:
           context: .
+          target: web
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push (rooms)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: rooms
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE }}:rooms
           cache-from: type=gha
           cache-to: type=gha,mode=max

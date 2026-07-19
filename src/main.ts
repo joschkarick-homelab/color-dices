@@ -1,6 +1,6 @@
 import './style.css'
 import { DiceTray, type DieSpec } from './dice'
-import { Net, type AnyState, type KniffelAction } from './net'
+import { Net, RoomNet, roomServerUrl, type AnyState, type GameNet, type KniffelAction } from './net'
 import {
   KNIFFEL_EVENT_META,
   MAX_ROLLS,
@@ -74,7 +74,7 @@ interface HostPlayer {
   connId: number | null // aktuelle Verbindung, null = getrennt (Host selbst: immer null)
 }
 
-let net: Net | null = null
+let net: GameNet | null = null
 let myIdx = 0
 let hostPlayers: HostPlayer[] = []
 let lobbyGame: GameId = 'qwixx'
@@ -84,6 +84,14 @@ let state: AnyState | null = null
 
 const isKniffel = (s: AnyState): s is KniffelState => (s as KniffelState).game === 'kniffel'
 const GAME_TITLES: Record<GameId, string> = { qwixx: 'Qwixx', kniffel: 'Kniffel' }
+
+/** Darf Spiel/Revanche starten: P2P-Host bzw. Raum-Ersteller im Server-Modus. */
+const canModerate = (): boolean => net?.moderator ?? false
+
+/** Passenden Netz-Beitritt wählen (Raum-Server, falls konfiguriert, sonst P2P). */
+function netJoin(code: string): Promise<GameNet> {
+  return roomServerUrl() ? RoomNet.join(code, getName(), getCid()) : Net.join(code)
+}
 let tray: DiceTray | null = null
 let selection: { white: Cell | null; colored: Cell | null } = { white: null, colored: null }
 let animating = false
@@ -221,7 +229,7 @@ async function autoReconnect(): Promise<void> {
   render()
   for (let attempt = 0; attempt < 3 && !peerConnected && gameMounted; attempt++) {
     try {
-      const fresh = await Net.join(session.code)
+      const fresh = await netJoin(session.code)
       net?.destroy()
       net = fresh
       setupGuestHandlers()
@@ -1016,6 +1024,27 @@ function showKniffelSetup(initial?: KniffelHouseRules): void {
 async function createGame(): Promise<void> {
   showWaiting('Raum wird erstellt …')
   net?.destroy()
+
+  // Server-Modus: Der Raum-Server verwaltet Lobby und Spiel; auch der
+  // Ersteller verhält sich wie ein Gast (Moderator-Rechte via welcome).
+  if (roomServerUrl()) {
+    const rules =
+      lobbyGame === 'kniffel' ? (kniffelLobbyRules ?? loadKniffelRules()) : (lobbyRules ?? loadRules())
+    try {
+      net = await RoomNet.create(lobbyGame, rules, getName(), getCid())
+    } catch (e) {
+      showHome(`Verbindung fehlgeschlagen: ${(e as Error).message ?? e}`)
+      return
+    }
+    peerConnected = true
+    saveSession({ role: 'guest', code: net.code, name: getName() })
+    // Erst den Wartescreen zeigen — beim Setzen der Handler liefert RoomNet
+    // gepufferte Nachrichten sofort aus und rendert dann Lobby/Spiel darüber.
+    showWaiting('Raum offen …')
+    setupGuestHandlers()
+    return
+  }
+
   try {
     net = await Net.host()
   } catch (e) {
@@ -1096,13 +1125,19 @@ function hostStartGame(): void {
   render()
 }
 
-/** Warte-Lobby des Gasts: zeigt die bereits beigetretenen Spieler. */
+/**
+ * Warte-Lobby für Gäste — und im Server-Modus auch für den Raum-Ersteller,
+ * der hier zusätzlich Code, Teilen-Button und Spielstart bekommt.
+ */
 function showGuestLobby(names: string[], game: GameId): void {
   gameMounted = false
+  const mod = canModerate()
+  const code = net?.code ?? ''
+  const url = `${location.origin}${location.pathname}?join=${code}`
   app.innerHTML = `
     <div class="screen center">
-      <div class="logo-dice">🎲</div>
-      <p class="subtitle">Du bist drin! Gespielt wird: <b>${esc(GAME_TITLES[game] ?? game)}</b></p>
+      <p class="subtitle">${esc(GAME_TITLES[game] ?? game)} · Raum-Code</p>
+      <div class="code-display">${esc(code)}</div>
       <div class="player-list">
         ${names
           .map(
@@ -1115,8 +1150,36 @@ function showGuestLobby(names: string[], game: GameId): void {
           )
           .join('')}
       </div>
-      <p class="subtitle pulse">Warte, bis ${esc(names[0] ?? 'der Host')} das Spiel startet …</p>
+      ${
+        mod
+          ? `<p class="subtitle ${names.length < MAX_PLAYERS ? 'pulse' : ''}">${names.length} von ${MAX_PLAYERS} Spielern${names.length < MAX_PLAYERS ? ' · weitere können beitreten …' : ' · Raum voll'}</p>
+             <div class="stack">
+               <button class="btn primary" id="start">▶️ Spiel starten (${names.length} Spieler)</button>
+               <button class="btn" id="share">📤 Einladung teilen</button>
+               <button class="btn" id="cancel">Abbrechen</button>
+             </div>`
+          : `<p class="subtitle pulse">Warte, bis ${esc(names[0] ?? 'der Host')} das Spiel startet …</p>
+             <div class="stack"><button class="btn" id="cancel">Verlassen</button></div>`
+      }
     </div>`
+  app.querySelector('#start')?.addEventListener('click', () => {
+    net?.send({ t: 'start' })
+  })
+  app.querySelector('#share')?.addEventListener('click', () => {
+    const text = `Spiel eine Runde ${GAME_TITLES[game]} mit mir! Code: ${code}`
+    if (navigator.share) {
+      void navigator.share({ title: GAME_TITLES[game], text, url })
+    } else {
+      void navigator.clipboard.writeText(`${text}\n${url}`)
+      alert('Link kopiert!')
+    }
+  })
+  app.querySelector('#cancel')?.addEventListener('click', () => {
+    net?.destroy()
+    net = null
+    saveSession(null)
+    showHome()
+  })
 }
 
 function showJoin(prefill = ''): void {
@@ -1144,7 +1207,7 @@ async function joinGame(code: string): Promise<void> {
   showWaiting('Verbinde …')
   net?.destroy()
   try {
-    net = await Net.join(code)
+    net = await netJoin(code)
   } catch (e) {
     showJoin('')
     const err = app.querySelector('#err')
@@ -1154,9 +1217,11 @@ async function joinGame(code: string): Promise<void> {
   peerConnected = true
   saveSession({ role: 'guest', code: net.code, name: getName() })
   history.replaceState(null, '', location.pathname)
+  // Wartescreen vor den Handlern: RoomNet liefert gepufferte Nachrichten
+  // beim Setzen des Handlers sofort aus (rendert ggf. direkt Lobby/Spiel).
+  showWaiting('Verbunden! Warte auf den Spielstart …')
   setupGuestHandlers()
   net.send({ t: 'hello', name: getName(), cid: getCid() })
-  showWaiting('Verbunden! Warte auf den Spielstart …')
 }
 
 async function resumeSession(session: Session): Promise<void> {
@@ -1262,7 +1327,9 @@ function onDynClick(ev: Event): void {
   } else if (action === 'rules') {
     showRulesOverlay()
   } else if (action === 'rematch') {
-    if (state && net?.role === 'host') {
+    if (net?.kind === 'server') {
+      if (canModerate()) net.send({ t: 'rematch' })
+    } else if (state && net?.role === 'host') {
       state = isKniffel(state)
         ? newKniffelGame(state.names, state.houseRules, state.matchNo + 1)
         : newGame(state.names, state.houseRules, state.matchNo + 1)
@@ -1359,7 +1426,7 @@ function kniffelView(): KniffelView {
     myIdx,
     animating,
     rollRequested,
-    isHost: net?.role === 'host',
+    isHost: canModerate(),
     peerConnected,
   }
 }
@@ -1554,7 +1621,7 @@ function renderGameOver(s: GameState): string {
         <h2>${winnerText}</h2>
         <div class="ranking">${rows}</div>
         ${
-          net?.role === 'host'
+          canModerate()
             ? `<button class="btn primary" data-action="rematch">🔄 Revanche</button>`
             : `<p class="subtitle pulse">Revanche startet ${esc(s.names[0])} …</p>`
         }

@@ -6,13 +6,17 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:server": "esbuild server/rooms.ts --bundle --platform=node --format=cjs --external:bufferutil --external:utf-8-validate --outfile=dist-server/rooms.cjs",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview"
   },
   "devDependencies": {
     "@types/three": "^0.185.1",
+    "@types/ws": "^8.18.1",
+    "esbuild": "^0.28.1",
     "typescript": "^7.0.2",
-    "vite": "^8.1.5"
+    "vite": "^8.1.5",
+    "ws": "^8.21.1"
   },
   "dependencies": {
     "cannon-es": "^0.20.0",
