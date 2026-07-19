@@ -162,7 +162,7 @@ export interface KniffelState {
   round: number // 1..13 (Runde des aktiven Spielers)
   rollId: number
   dice: number[] | null // 5 Würfel, null = Zug noch nicht begonnen
-  held: boolean[] // festgehaltene Würfel (zwischen den Würfen)
+  held: boolean[] // true = bleibt liegen; false = zum Neuwürfeln ausgewählt
   rolled: boolean[] // welche Würfel im letzten Wurf neu geworfen wurden
   rollsUsed: number // 0..3 im aktuellen Zug
   houseRules: KniffelHouseRules
@@ -189,7 +189,7 @@ export function newKniffelGame(
     round: 1,
     rollId: 0,
     dice: null,
-    held: [false, false, false, false, false],
+    held: [true, true, true, true, true],
     rolled: [true, true, true, true, true],
     rollsUsed: 0,
     houseRules,
@@ -299,10 +299,12 @@ export function kniffelRoll(
   // Alles festgehalten → es gibt nichts zu würfeln
   if (state.dice !== null && held.every(Boolean)) return false
   state.dice = dice
-  state.held = held
   state.rolled = held.map((h) => !h || state.rollsUsed === 0)
   state.rollsUsed++
   state.rollId++
+  // Nach jedem Wurf ist nichts zum Neuwürfeln ausgewählt (held = alle bleiben):
+  // Neuwürfeln ist immer eine explizite Auswahl des Spielers.
+  state.held = [true, true, true, true, true]
   return true
 }
 
@@ -351,7 +353,7 @@ export function kniffelScore(
   }
 
   state.dice = null
-  state.held = [false, false, false, false, false]
+  state.held = [true, true, true, true, true]
   state.rollsUsed = 0
   state.events = [...state.events, ...events]
   return true

@@ -70,8 +70,10 @@ Regeltext bleibt stehen, bis es weggetippt wird.
 ## Kniffel
 
 Klassisches Kniffel nach den offiziellen Regeln: Der aktive Spieler würfelt
-5 Würfel, darf bis zu 3× würfeln und zwischen den Würfen Würfel festhalten
-(antippen), dann eine Kategorie eintragen oder streichen. Oben gibt es ab
+5 Würfel und darf bis zu 3× würfeln. Zwischen den Würfen tippt er die Würfel
+an, die **neu geworfen** werden sollen (Standard: keiner — Neuwürfeln ist
+immer eine explizite Auswahl, der Rest bleibt liegen), dann eine Kategorie
+eintragen oder streichen. Oben gibt es ab
 63 Punkten +35 Bonus, jeder weitere Kniffel bringt +100 (mit Joker-Wertung
 für Full House und Straßen). Alle sehen live, wie der aktive Spieler würfelt
 und hält; die Zettel der Mitspieler stehen unter dem eigenen.
