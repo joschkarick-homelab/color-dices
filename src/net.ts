@@ -5,6 +5,17 @@
 
 import { Peer, type DataConnection, type PeerOptions } from 'peerjs'
 import type { GameState, Move } from './rules'
+import type { KniffelCategory, KniffelState } from './kniffel'
+import type { GameId } from './presets'
+
+/** Zustand irgendeines Spiels; `game` fehlt bei alten Qwixx-Ständen. */
+export type AnyState = GameState | KniffelState
+
+/** Kniffel-Aktion eines Gasts (der Host führt sie aus). */
+export type KniffelAction =
+  | { k: 'roll'; hold: boolean[] }
+  | { k: 'hold'; hold: boolean[] }
+  | { k: 'score'; cat: KniffelCategory }
 
 const ID_PREFIX = 'qwixx-de-'
 
@@ -48,12 +59,13 @@ const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789' // ohne I/L/O/0/1
 export type NetMessage =
   | { t: 'hello'; name: string; cid: string } // Gast meldet sich an (auch Reconnect)
   | { t: 'welcome'; idx: number } // Host teilt dem Gast seinen Spieler-Index mit
-  | { t: 'lobby'; names: string[] } // aktueller Lobby-Stand für alle Gäste
+  | { t: 'lobby'; names: string[]; game: GameId } // aktueller Lobby-Stand für alle Gäste
   | { t: 'full' } // Raum voll oder Spiel läuft bereits
-  | { t: 'state'; s: GameState }
-  | { t: 'move'; move: Move }
-  | { t: 'rollreq' } // Gast ist am Zug und möchte würfeln (Host würfelt)
-  | { t: 'targetreq'; uid: string } // Gast möchte für ein Event das Ziel auswürfeln
+  | { t: 'state'; s: AnyState }
+  | { t: 'move'; move: Move } // Qwixx: Zug des Gasts
+  | { t: 'rollreq' } // Qwixx: Gast ist am Zug und möchte würfeln (Host würfelt)
+  | { t: 'targetreq'; uid: string } // Qwixx: Gast möchte für ein Event das Ziel auswürfeln
+  | { t: 'act'; a: KniffelAction } // Kniffel: Aktion des Gasts
 
 export function randomCode(len = 4): string {
   let out = ''

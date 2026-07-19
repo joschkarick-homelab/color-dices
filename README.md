@@ -1,10 +1,10 @@
 # 🎲 Würfelrunde
 
 Würfelspiele für **1–10 Spieler:innen** — jede:r am eigenen Handy im Browser.
-Erstes Spiel: **Qwixx**, weitere (z. B. Kniffel) sind vorbereitet und über die
-Spielauswahl auf der Startseite erweiterbar. Mit physikalisch simulierten
-3D-Würfeln (three.js + cannon-es) und frei konfigurierbaren Hausregeln für
-Päsche, Straßen & Co.
+Aktuell spielbar: **Qwixx** und **Kniffel** (Auswahl auf der Startseite,
+weitere Spiele lassen sich ergänzen). Mit physikalisch simulierten 3D-Würfeln
+(three.js + cannon-es) und frei konfigurierbaren Hausregeln, die sich als
+Vorlagen speichern lassen.
 
 ## Spielen
 
@@ -58,6 +58,41 @@ einzelner Zielwürfel geworfen (per Button im Event-Banner oder über den
 🎯-Chip), der eine Zahl von 1–6 bestimmt — z. B. wer wie viel verteilt. Alle
 Handys sehen denselben Zielwert; das Ergebnis samt auslösendem Ereignis und
 Regeltext bleibt stehen, bis es weggetippt wird.
+
+## Kniffel
+
+Klassisches Kniffel nach den offiziellen Regeln: Der aktive Spieler würfelt
+5 Würfel, darf bis zu 3× würfeln und zwischen den Würfen Würfel festhalten
+(antippen), dann eine Kategorie eintragen oder streichen. Oben gibt es ab
+63 Punkten +35 Bonus, jeder weitere Kniffel bringt +100 (mit Joker-Wertung
+für Full House und Straßen). Alle sehen live, wie der aktive Spieler würfelt
+und hält; die Zettel der Mitspieler stehen unter dem eigenen.
+
+### Kniffel-Hausregeln 🥃
+
+Jede Regel besteht aus drei Bausteinen — so ist immer klar, **was mit wem
+passiert**:
+
+1. **Auslöser**: Kniffel, Zusatz-Kniffel, Viererpasch, Full House, große/kleine
+   Straße, Gestrichen, Bonus geschafft, Sieg, letzter Platz.
+2. **Zielperson**: der Auslöser selbst, alle anderen, alle — oder 🎲 **ein
+   Würfelwurf bestimmt den Spieler** (Sitzreihenfolge = Würfelzahl).
+3. **Aktion mit Varianz**: fester Text, optional 🎲 **Anzahl auswürfeln** (1–6)
+   und/oder eine 🎲 **Würfeltabelle** mit 6 frei beschriftbaren Einträgen
+   (z. B. welcher Shot; leere Felder = Glück gehabt).
+
+Beispiel: *Kniffel!* → Zielperson auswürfeln → **Ben** → Tabelle auswürfeln →
+**3 = Tequila**. Jede ausgewürfelte Stufe rollt sichtbar über den Würfeltisch
+(blau = wer, rot = wie oft, gelb = was), das Banner fasst alles zusammen und
+bleibt stehen, bis es weggetippt wird.
+
+### Regel-Vorlagen 💾
+
+Hausregeln (Qwixx und Kniffel) lassen sich im Setup als benannte Vorlagen
+speichern, laden und löschen. Vorlagen sind aktuell **global auf dem Gerät**
+gespeichert (localStorage); die Persistenz-Schicht ([`src/presets.ts`](src/presets.ts))
+ist mit `owner`-Feld und async API bereits so gebaut, dass später ein Backend
+mit user-gebundenen Vorlagen dieselbe Schnittstelle bedienen kann.
 
 ### Die Würfel 🎲
 

@@ -120,6 +120,7 @@ export interface PlayerCard {
 }
 
 export interface GameState {
+  game?: 'qwixx' // fehlt bei alten Spielständen — Abwesenheit bedeutet Qwixx
   phase: 'lobby' | 'playing' | 'ended'
   names: string[] // Index 0 = Host, 1–10 Spieler insgesamt
   cards: PlayerCard[]
