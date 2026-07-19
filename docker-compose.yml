@@ -6,6 +6,13 @@ services:
       - "8090:80"
     depends_on:
       - peer
+      - rooms
+
+  # Raum-Server: hält Spielstände serverseitig (Verbindungen dürfen abreißen)
+  rooms:
+    build:
+      context: .
+      target: rooms
 
   peer:
     image: peerjs/peerjs-server:latest

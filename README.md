@@ -14,12 +14,20 @@ Vorlagen speichern lassen.
 2. **Die Mitspieler:innen** treten mit dem Code bei. Der Host sieht in der
    Lobby, wer schon da ist, und startet das Spiel, sobald er möchte —
    auch solo oder mit bis zu 9 Gästen.
-3. Losgewürfelt! Die Handys verbinden sich **direkt per WebRTC** (P2P,
-   Stern-Topologie über den Host) — es läuft kein Spielserver, nur die
-   Signalisierung geht über den kostenlosen öffentlichen
-   [PeerJS](https://peerjs.com)-Broker.
+3. Losgewürfelt! Im Homelab-Deployment hält ein **Raum-Server** den
+   Spielstand — Verbindungsabbrüche (Standby, App-Wechsel, Reload) sind
+   unkritisch, beim Wiederverbinden kommt der aktuelle Stand vom Server.
+   Ohne Server (GitHub Pages, Dev) verbinden sich die Handys **direkt per
+   WebRTC** (P2P, Stern-Topologie über den Host).
 4. Im Spiel einfach nach unten scrollen, um die Boards aller Mitspieler:innen
    und deren Fortschritt zu sehen.
+
+### Als App aufs Handy 📱
+
+Die App ist eine PWA: In Safari/Chrome **„Zum Home-Bildschirm hinzufügen"**
+wählen — dann startet sie im Vollbild mit eigenem Icon, und die
+Bildschirmsperre wird während des Spiels zuverlässig unterdrückt (Wake Lock,
+auf iOS ab 18.4 auch in installierten Web-Apps).
 
 ### Regeln
 
@@ -133,18 +141,26 @@ GHCR-Package auf „public" gestellt werden.
 
 Lokal testen: `docker compose up --build` → http://localhost:8090
 
-### PeerJS-Signalisierung
+### Raum-Server (empfohlen) & PeerJS-Fallback
 
-Im Homelab-Deployment (Variante B) läuft ein eigener
-[PeerServer](https://github.com/peers/peerjs-server) als `peer`-Container im
-Compose-Stack. nginx proxied ihn unter `/peer` auf derselben Domain — die App
-nutzt ihn im Docker-Build automatisch (Build-Variable `VITE_PEER_PATH`).
+Im Homelab-Deployment (Variante B) läuft der **Raum-Server**
+([`server/rooms.ts`](server/rooms.ts)) als `rooms`-Container im Compose-Stack
+(Image-Tag `:rooms`, nginx-Proxy unter `/rooms`, Build-Variable
+`VITE_ROOM_PATH`). Er nutzt dieselben Engine-Module wie der Client, hält
+Lobby + Spielstand im Speicher und führt alle Aktionen selbst aus. Dadurch
+sind Verbindungsabbrüche egal: Jeder Client — auch der Raum-Ersteller — kann
+das Handy sperren, die App wechseln oder neu laden und steigt per Client-ID
+nahtlos wieder ein. Räume werden nach längerer Inaktivität aufgeräumt; ein
+Container-Neustart beendet laufende Spiele.
 
-Vite-Dev und GitHub Pages (Variante A) haben keinen eigenen Broker und
-nutzen die öffentliche PeerJS-Cloud. Ein manueller Override geht weiterhin
-auf beiden Geräten per Browser-Konsole:
+Ohne Raum-Server (Vite-Dev, GitHub Pages) läuft der P2P-Modus über den
+[PeerServer](https://github.com/peers/peerjs-server) (`peer`-Container,
+`/peer`-Proxy, `VITE_PEER_PATH`) bzw. die öffentliche PeerJS-Cloud.
+Manuelle Overrides per Browser-Konsole:
 
 ```js
+localStorage.setItem('qwixx.roomhost', '127.0.0.1:9300') // Raum-Server direkt
+localStorage.setItem('qwixx.roomhost', 'off')            // Server-Modus abschalten
 localStorage.setItem('qwixx.peerhost', 'peer.example.de:443/qwixx')
 ```
 
@@ -152,9 +168,10 @@ localStorage.setItem('qwixx.peerhost', 'peer.example.de:443/qwixx')
 
 ```bash
 npm install
-npm run dev        # Dev-Server
-npm run typecheck  # TypeScript prüfen
-npm run build      # Produktions-Build nach dist/
+npm run dev           # Dev-Server
+npm run typecheck     # TypeScript prüfen (Client + Server)
+npm run build         # Produktions-Build nach dist/
+npm run build:server  # Raum-Server-Bundle nach dist-server/
 ```
 
 Stack: Vite + TypeScript (vanilla), three.js + cannon-es (Würfel),

@@ -104,6 +104,11 @@ export function renderKniffelOverlay(
     return
   }
   if (myTurn && s.rollsUsed < MAX_ROLLS) {
+    // Alles festgehalten → es gibt nichts zu würfeln; erst freigeben oder eintragen
+    if (s.dice && s.rollsUsed >= 1 && s.held.every(Boolean)) {
+      el.innerHTML = `<div class="msg bottom">🔒 Alles festgehalten – Würfel freigeben oder eintragen</div>`
+      return
+    }
     const label =
       s.rollsUsed === 0 ? '🎲 Würfeln' : `🎲 Nochmal würfeln (${s.rollsUsed + 1}/${MAX_ROLLS})`
     el.innerHTML = v.rollRequested
@@ -165,7 +170,7 @@ export function renderKniffelDyn(el: HTMLElement, s: KniffelState, v: KniffelVie
           canHold ? `data-action="kdie" data-i="${i}"` : 'disabled'
         }>${val}${held ? '<span class="klock">🔒</span>' : ''}</button>`
       })
-      .join('')}</div>${canHold ? '<div class="khint">Antippen = festhalten</div>' : ''}`
+      .join('')}</div>${canHold ? '<div class="khint">Antippen = festhalten · nochmal antippen = wieder freigeben</div>' : ''}`
   }
 
   // Zettel
