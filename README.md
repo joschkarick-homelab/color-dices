@@ -53,10 +53,11 @@ festlegen, der allen angezeigt wird, sobald es eintritt:
 | 🏆 Sieg | jemand gewinnt |
 
 Für die würfelbasierten Events (beide Päsche, beide Straßen) gibt es zusätzlich
-die Option **„🎯 Ziel auswürfeln?"**: Ist sie aktiv, können nach dem Event die
-beteiligten Würfel einmal neu geworfen werden (per Button im Event-Banner oder
-über den 🎯-Chip), um Ziele von 1–6 zu bestimmen — z. B. wer wie viel verteilt.
-Alle Handys sehen dieselben Zielwerte.
+die Option **„🎯 Ziel auswürfeln?"**: Ist sie aktiv, wird nach dem Event ein
+einzelner Zielwürfel geworfen (per Button im Event-Banner oder über den
+🎯-Chip), der eine Zahl von 1–6 bestimmt — z. B. wer wie viel verteilt. Alle
+Handys sehen denselben Zielwert; das Ergebnis samt auslösendem Ereignis und
+Regeltext bleibt stehen, bis es weggetippt wird.
 
 ### Die Würfel 🎲
 

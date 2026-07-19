@@ -473,13 +473,13 @@ async function animateRoll(): Promise<void> {
   render()
 }
 
-/** Zielwurf abspielen: nur die beteiligten Würfel werden neu geworfen. */
+/** Zielwurf abspielen: ein einzelner (weißer) Zielwürfel wird geworfen. */
 async function animateTarget(e: GameEvent): Promise<void> {
   if (!tray || !e.target || !e.dice || shownTargets.has(e.uid)) return
   shownTargets.add(e.uid)
   animating = true
   render()
-  const specs: DieSpec[] = e.dice.map((kind, i) => ({ kind, value: e.target![i] }))
+  const specs: DieSpec[] = e.target.map((value) => ({ kind: 'white', value }))
   try {
     await tray.roll(specs)
   } finally {
@@ -491,30 +491,32 @@ async function animateTarget(e: GameEvent): Promise<void> {
   queueTargetAnimations()
 }
 
+/**
+ * Ergebnis des Zielwurfs: zeigt das auslösende Ereignis (z. B. den Pasch)
+ * samt Regeltexten und den ausgewürfelten Zielwürfel. Schließt sich bewusst
+ * NICHT von selbst — nur per Tippen, damit niemand das Ergebnis verpasst.
+ */
 function showTargetBanner(e: GameEvent): Promise<void> {
   return new Promise((resolve) => {
     const meta = EVENT_META[e.id]
-    const chips = e.dice!
-      .map((kind, i) => `<span class="die-chip ${kind}">${e.target![i]}</span>`)
-      .join('')
+    const rule = state?.houseRules[e.id]
+    const chips = e.target!.map((v) => `<span class="die-chip white">${v}</span>`).join('')
     const el = document.createElement('div')
     el.className = 'banner-backdrop'
     el.innerHTML = `
       <div class="banner">
         <div class="emoji">🎯</div>
         <h2>Ziel ausgewürfelt!</h2>
-        <p class="who">${meta.emoji} ${esc(meta.title)}${e.detail ? ` · ${esc(e.detail)}` : ''}</p>
+        <p class="who">${meta.emoji} ${esc(meta.title)}${e.detail ? ` · ${esc(e.detail)}` : ''}${e.player ? ` · ${esc(e.player)}` : ''}</p>
+        ${rule?.enabled ? ruleTextsFor(e, rule).map((t) => `<div class="ruletext">${esc(t)}</div>`).join('') : ''}
         <div class="target-chips">${chips}</div>
         <div class="tap-hint">Tippen zum Schließen</div>
       </div>`
     document.body.appendChild(el)
-    const close = (): void => {
-      clearTimeout(timer)
+    el.addEventListener('click', () => {
       el.remove()
       resolve()
-    }
-    const timer = setTimeout(close, 6000)
-    el.addEventListener('click', close)
+    })
   })
 }
 
@@ -669,7 +671,7 @@ function showSetup(): void {
                 }
                 ${
                   REROLLABLE_EVENTS.includes(id)
-                    ? `<label class="reroll-opt"><input type="checkbox" data-reroll ${r.reroll ? 'checked' : ''} /> 🎯 Ziel auswürfeln? <span class="hint">Die beteiligten Würfel dürfen neu geworfen werden, um Ziele (1–6) zu bestimmen</span></label>`
+                    ? `<label class="reroll-opt"><input type="checkbox" data-reroll ${r.reroll ? 'checked' : ''} /> 🎯 Ziel auswürfeln? <span class="hint">Nach dem Ereignis bestimmt ein einzelner Zielwürfel eine Zahl von 1–6</span></label>`
                     : ''
                 }
               </div>
@@ -915,8 +917,11 @@ function mountGame(): void {
   tray?.dispose()
   tray = new DiceTray(mount)
   tray.muted = localStorage.getItem('qwixx.muted') === '1'
-  mount.addEventListener('click', () => {
-    if (animating) tray?.skip()
+  mount.addEventListener('click', (ev) => {
+    // Nur echte Taps auf den Würfeltisch überspringen — Klicks auf Buttons im
+    // Overlay (z. B. „Würfeln") blubbern hierher und würden sonst die gerade
+    // gestartete Animation sofort zu Ende spulen.
+    if (animating && !(ev.target as HTMLElement).closest('button')) tray?.skip()
   })
   document.getElementById('gameDyn')!.addEventListener('click', onDynClick)
   document.getElementById('topbar')!.addEventListener('click', onDynClick)
@@ -1013,7 +1018,10 @@ function renderDiceOverlay(): void {
       el.innerHTML = rollRequested
         ? `<div class="msg pulse">Würfeln …</div>`
         : `<button class="roll-btn" id="rollBtn">🎲 Würfeln</button>`
-      el.querySelector('#rollBtn')?.addEventListener('click', requestRoll)
+      el.querySelector('#rollBtn')?.addEventListener('click', (ev) => {
+        ev.stopPropagation()
+        requestRoll()
+      })
     } else {
       el.innerHTML = `<div class="msg pulse">${esc(state.names[state.active])} würfelt …</div>`
     }
