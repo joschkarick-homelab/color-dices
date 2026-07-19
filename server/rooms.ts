@@ -127,9 +127,34 @@ function handleGameMsg(room: Room, idx: number, m: NetMessage): void {
 /** Beitritt oder Reconnect (join und hello nutzen denselben Pfad). */
 function joinRoom(room: Room, ws: WebSocket, cid: string, name: string): number | null {
   let idx = room.players.findIndex((p) => p.cid === cid)
+
+  // Sitz-Übernahme: Unbekannte Client-ID, aber ein Spieler mit demselben Namen
+  // ist offline → vermutlich dieselbe Person mit neuer Client-ID (neuer Tab,
+  // PWA statt Browser, Neustart). Der freie Platz wird übernommen.
+  if (idx < 0 && room.state && name.trim()) {
+    const seat = room.players.findIndex(
+      (p) =>
+        p.name.toLowerCase() === name.trim().toLowerCase() &&
+        (!p.ws || p.ws.readyState !== p.ws.OPEN),
+    )
+    if (seat >= 0) {
+      if (room.creatorCid === room.players[seat].cid) room.creatorCid = cid
+      room.players[seat].cid = cid
+      idx = seat
+    }
+  }
+
   if (idx < 0) {
-    if (room.state || room.players.length >= MAX_PLAYERS) {
-      send(ws, { t: 'joinfail', reason: 'Das Spiel ist schon voll oder läuft bereits.' })
+    if (room.state) {
+      send(ws, {
+        t: 'joinfail',
+        reason:
+          'Das Spiel läuft bereits. Tritt mit deinem bisherigen Namen bei, um deinen Platz zu übernehmen.',
+      })
+      return null
+    }
+    if (room.players.length >= MAX_PLAYERS) {
+      send(ws, { t: 'joinfail', reason: `Der Raum ist voll (${MAX_PLAYERS} Spieler).` })
       return null
     }
     room.players.push({ cid, name: name || `Spieler ${room.players.length + 1}`, ws })

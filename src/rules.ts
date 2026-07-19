@@ -47,6 +47,13 @@ export interface HouseRule {
   reroll?: boolean
   /** Eigene Texte je Pasch-Zahl (1–6); Fallback ist `text`. Nur für Pasch-Events. */
   numberTexts?: Partial<Record<number, string>>
+  /**
+   * Nur für Pasch-Events: Bei welchen Pasch-Zahlen wird das Ziel ausgewürfelt?
+   * Fehlt das Feld, gilt der Zielwurf für alle Zahlen (sofern `reroll` an ist).
+   */
+  rerollNumbers?: number[]
+  /** Texte je Ziel-Ergebnis (1–6), z. B. 1 = „Tequila". Anzeige im Ziel-Banner. */
+  targetTexts?: Partial<Record<number, string>>
 }
 
 /** Events, bei denen ein Zielwurf möglich ist (würfelbasierte Events). */
@@ -251,6 +258,20 @@ function detectRollEvents(state: GameState): GameEvent[] {
 }
 
 /**
+ * Ist für dieses Event (noch) ein Zielwurf möglich? Berücksichtigt bei
+ * Pasch-Events die konfigurierten Pasch-Zahlen (z. B. 1er-Pasch ohne Ziel).
+ */
+export function canRollTarget(state: GameState, e: GameEvent): boolean {
+  if (!e.dice || e.target) return false
+  const rule = state.houseRules[e.id]
+  if (!rule?.enabled || !rule.reroll || !REROLLABLE_EVENTS.includes(e.id)) return false
+  if (PASCH_EVENTS.includes(e.id) && rule.rerollNumbers && e.numbers?.length) {
+    return e.numbers.some((n) => rule.rerollNumbers!.includes(n))
+  }
+  return true
+}
+
+/**
  * Zielwurf für ein würfelbasiertes Hausregel-Event: Ein einzelner Würfel
  * bestimmt das Ziel (1–6). Pro Event nur einmal möglich. Gibt das
  * aktualisierte Event zurück, sonst null.
@@ -263,9 +284,7 @@ export function rollTarget(
   // Zielwürfe sind erst dran, wenn der Zug aufgelöst ist (Kreuze gesetzt).
   if (state.phase === 'playing' && state.dice) return null
   const e = state.events.find((x) => x.uid === uid)
-  if (!e || !e.dice || e.target) return null
-  const rule = state.houseRules[e.id]
-  if (!rule.enabled || !rule.reroll || !REROLLABLE_EVENTS.includes(e.id)) return null
+  if (!e || !canRollTarget(state, e)) return null
   e.target = [1 + Math.floor(random() * 6)]
   return e
 }

@@ -36,6 +36,7 @@ import {
   MAX_PLAYERS,
   PASCH_EVENTS,
   ROW_NUMBERS,
+  canRollTarget,
   colorCandidates,
   colorSums,
   defaultHouseRules,
@@ -310,6 +311,17 @@ function hostConnectedCount(): number {
 /** Beitritt/Reconnect eines Gasts (in Lobby und im laufenden Spiel). */
 function hostHandleHello(m: { name: string; cid: string }, from: number): void {
   let idx = hostPlayers.findIndex((p) => p.cid === m.cid)
+  // Sitz-Übernahme: gleicher Name + offline → dieselbe Person mit neuer
+  // Client-ID (neuer Tab, PWA statt Browser, Neustart)
+  if (idx < 0 && state && m.name.trim()) {
+    const seat = hostPlayers.findIndex(
+      (p, i) => i > 0 && p.connId === null && p.name.toLowerCase() === m.name.trim().toLowerCase(),
+    )
+    if (seat >= 0) {
+      hostPlayers[seat].cid = m.cid
+      idx = seat
+    }
+  }
   if (idx < 0) {
     // Neuer Spieler: nur in der Lobby und solange Platz ist
     if (state || hostPlayers.length >= MAX_PLAYERS) {
@@ -404,7 +416,9 @@ function setupGuestHandlers(): void {
       net?.destroy()
       net = null
       saveSession(null)
-      showHome('Das Spiel ist schon voll oder läuft bereits.')
+      showHome(
+        'Das Spiel ist schon voll oder läuft bereits. Tipp: Tritt mit deinem bisherigen Namen bei, um deinen Platz zu übernehmen.',
+      )
       return
     }
     if (m.t !== 'state') return
@@ -634,6 +648,8 @@ function showTargetBanner(e: GameEvent): Promise<void> {
     const meta = EVENT_META[e.id]
     const rule = state && !isKniffel(state) ? state.houseRules[e.id] : undefined
     const chips = e.target!.map((v) => `<span class="die-chip white">${v}</span>`).join('')
+    // Zieltext zum ausgewürfelten Ergebnis (z. B. 1 = „Tequila")
+    const targetText = rule?.targetTexts?.[e.target![0]]?.trim()
     const el = document.createElement('div')
     el.className = 'banner-backdrop'
     el.innerHTML = `
@@ -643,6 +659,7 @@ function showTargetBanner(e: GameEvent): Promise<void> {
         <p class="who">${meta.emoji} ${esc(meta.title)}${e.detail ? ` · ${esc(e.detail)}` : ''}${e.player ? ` · ${esc(e.player)}` : ''}</p>
         ${rule?.enabled ? ruleTextsFor(e, rule).map((t) => `<div class="ruletext">${esc(t)}</div>`).join('') : ''}
         <div class="target-chips">${chips}</div>
+        ${targetText ? `<div class="ruletext">🎯 ${e.target![0]} = ${esc(targetText)}</div>` : ''}
         <div class="tap-hint">Tippen zum Schließen</div>
       </div>`
     document.body.appendChild(el)
@@ -698,9 +715,7 @@ function showBanner(e: GameEvent): Promise<void> {
   return new Promise((resolve) => {
     const meta = EVENT_META[e.id]
     const rule = state && !isKniffel(state) ? state.houseRules[e.id] : undefined
-    const canTarget = Boolean(
-      e.dice && !e.target && rule?.enabled && rule.reroll && REROLLABLE_EVENTS.includes(e.id),
-    )
+    const canTarget = Boolean(state && !isKniffel(state) && canRollTarget(state, e))
     const el = document.createElement('div')
     el.className = 'banner-backdrop'
     el.innerHTML = `
@@ -887,7 +902,28 @@ function showSetup(initial?: HouseRules): void {
                 }
                 ${
                   REROLLABLE_EVENTS.includes(id)
-                    ? `<label class="reroll-opt"><input type="checkbox" data-reroll ${r.reroll ? 'checked' : ''} /> 🎯 Ziel auswürfeln? <span class="hint">Nach dem Ereignis bestimmt ein einzelner Zielwürfel eine Zahl von 1–6</span></label>`
+                    ? `<label class="reroll-opt"><input type="checkbox" data-reroll ${r.reroll ? 'checked' : ''} /> 🎯 Ziel auswürfeln? <span class="hint">Nach dem Ereignis bestimmt ein einzelner Zielwürfel eine Zahl von 1–6</span></label>
+                      <div class="target-config" ${r.reroll ? '' : 'style="display:none"'}>
+                        ${
+                          PASCH_EVENTS.includes(id)
+                            ? `<div class="numtoggles"><span class="hint">Ziel auswürfeln bei:</span>${[1, 2, 3, 4, 5, 6]
+                                .map(
+                                  (n) =>
+                                    `<label class="numtoggle"><input type="checkbox" data-rerollnum data-num="${n}" ${!r.rerollNumbers || r.rerollNumbers.includes(n) ? 'checked' : ''} />${n}er</label>`,
+                                )
+                                .join('')}</div>`
+                            : ''
+                        }
+                        <details class="numrules" ${r.targetTexts && Object.keys(r.targetTexts).length ? 'open' : ''}>
+                          <summary>🎯 Texte je Ziel-Ergebnis (optional)</summary>
+                          ${[1, 2, 3, 4, 5, 6]
+                            .map(
+                              (n) =>
+                                `<label class="numrule"><span>🎯 ${n}</span><input type="text" data-targettext data-num="${n}" maxlength="120" value="${esc(r.targetTexts?.[n] ?? '')}" placeholder="z. B. Tequila" /></label>`,
+                            )
+                            .join('')}
+                        </details>
+                      </div>`
                     : ''
                 }
               </div>
@@ -906,6 +942,12 @@ function showSetup(initial?: HouseRules): void {
       body.style.display = toggle.checked ? '' : 'none'
     })
   })
+  app.querySelectorAll<HTMLInputElement>('[data-reroll]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const cfg = cb.closest('.rule-body')?.querySelector<HTMLElement>('.target-config')
+      if (cfg) cfg.style.display = cb.checked ? '' : 'none'
+    })
+  })
   const collect = (): HouseRules => {
     const out = {} as HouseRules
     app.querySelectorAll<HTMLElement>('.rule-item').forEach((item) => {
@@ -921,6 +963,20 @@ function showSetup(initial?: HouseRules): void {
         if (v) numberTexts[Number(inp.dataset.num)] = v
       })
       if (Object.keys(numberTexts).length) out[id].numberTexts = numberTexts
+      // Zielwurf nur bei bestimmten Pasch-Zahlen? (fehlt = alle)
+      const rerollNums: number[] = []
+      item.querySelectorAll<HTMLInputElement>('[data-rerollnum]').forEach((inp) => {
+        if (inp.checked) rerollNums.push(Number(inp.dataset.num))
+      })
+      if (item.querySelector('[data-rerollnum]') && rerollNums.length < 6) {
+        out[id].rerollNumbers = rerollNums
+      }
+      const targetTexts: Partial<Record<number, string>> = {}
+      item.querySelectorAll<HTMLInputElement>('[data-targettext]').forEach((inp) => {
+        const v = inp.value.trim()
+        if (v) targetTexts[Number(inp.dataset.num)] = v
+      })
+      if (Object.keys(targetTexts).length) out[id].targetTexts = targetTexts
     })
     return out
   }
@@ -1480,8 +1536,7 @@ function renderDyn(): void {
   // Ausstehende Zielwürfe — erst nach der Zug-Auflösung, bis zum nächsten Wurf
   if (!animating && s.phase === 'playing' && !s.dice) {
     for (const e of s.events) {
-      const rule = s.houseRules[e.id]
-      if (e.dice && !e.target && rule.enabled && rule.reroll) {
+      if (canRollTarget(s, e)) {
         sums += `<button class="sum-chip target-btn" data-action="target" data-uid="${e.uid}">🎯 ${esc(EVENT_META[e.id].title)}${e.detail ? ` (${esc(e.detail)})` : ''}: Ziel auswürfeln</button>`
       }
     }
@@ -1685,7 +1740,20 @@ function showRulesOverlay(): void {
         <div class="rule-head"><span>${meta.emoji}</span><span class="title">${esc(meta.title)}<span class="hint">${esc(meta.hint)}</span></span></div>
         ${r.text ? `<p style="margin:8px 0 0;font-size:0.95rem">${esc(r.text)}</p>` : ''}
         ${numTexts}
-        ${r.reroll ? `<p style="margin:6px 0 0;font-size:0.8rem;color:var(--muted)">🎯 Ziel wird ausgewürfelt</p>` : ''}
+        ${
+          r.reroll
+            ? `<p style="margin:6px 0 0;font-size:0.8rem;color:var(--muted)">🎯 Ziel wird ausgewürfelt${
+                r.rerollNumbers ? ` (bei ${r.rerollNumbers.map((n) => `${n}er`).join(', ')})` : ''
+              }</p>`
+            : ''
+        }
+        ${
+          r.reroll && r.targetTexts
+            ? Object.entries(r.targetTexts)
+                .map(([n, t]) => `<p style="margin:4px 0 0;font-size:0.8rem;color:var(--muted)">🎯 ${n} = ${esc(t ?? '')}</p>`)
+                .join('')
+            : ''
+        }
       </div>`
     })
     .join('')
